@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UniMelb UX/UI Analyzer</title>
+    <style>
+        :root {
+            --unimelb-blue: #094183;
+            --unimelb-light-blue: #00A3DA;
+            --bg-color: #f4f5f7;
+            --text-main: #333333;
+            --text-light: #666666;
+            --white: #ffffff;
+            --border-color: #d1d5da;
+            --highlight-flaw: #d93829;
+            --highlight-duplicate: #e5a712;
+            --highlight-success: #1a7a3e;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        header {
+            background-color: var(--unimelb-blue);
+            color: var(--white);
+            padding: 1.5rem 2rem;
+            display: flex;
+            align-items: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        header h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        .controls-section {
+            background: var(--white);
+            padding: 1.5rem 2rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .input-group {
+            flex-grow: 1;
+            display: flex;
+            max-width: 800px;
+        }
+
+        input[type="url"] {
+            flex-grow: 1;
+            padding: 0.75rem 1rem;
+            border: 1px solid var(--border-color);
+            border-radius: 4px 0 0 4px;
+            font-size: 1rem;
+            outline: none;
+        }
+
+        input[type="url"]:focus {
+            border-color: var(--unimelb-blue);
+        }
+
+        button {
+            background-color: var(--unimelb-blue);
+            color: var(--white);
+            border: none;
+            padding: 0.75rem 1.5rem;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            border-radius: 0 4px 4px 0;
+            transition: background-color 0.2s;
+        }
+
+        button:hover {
+            background-color: #063163;
+        }
+
+        .main-content {
+            display: flex;
+            flex-grow: 1;
+            padding: 2rem;
+            gap: 2rem;
+            height: calc(100vh - 140px);
+        }
+
+        .preview-pane {
+            flex: 2;
+            background: var(--white);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+
+        .pane-header {
+            background: #e9ecef;
+            padding: 0.75rem 1rem;
+            font-weight: 600;
+            font-size: 0.9rem;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-light);
+        }
+
+        iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            background-color: #fafafa;
+        }
+
+        .analysis-pane {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+            overflow-y: auto;
+            padding-right: 0.5rem;
+        }
+
+        .card {
+            background: var(--white);
+            border-radius: 8px;
+            padding: 1.5rem;
+            border: 1px solid var(--border-color);
+            border-top: 4px solid var(--unimelb-light-blue);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+
+        .card.flaws { border-top-color: var(--highlight-flaw); }
+        .card.duplicates { border-top-color: var(--highlight-duplicate); }
+        .card.improvements { border-top-color: var(--highlight-success); }
+        .card.excessive { border-top-color: var(--text-main); }
+
+        .card h2 {
+            font-size: 1.1rem;
+            margin-bottom: 1rem;
+            color: var(--unimelb-blue);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .analysis-list {
+            list-style: none;
+        }
+
+        .analysis-list li {
+            margin-bottom: 0.75rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid #eee;
+            font-size: 0.95rem;
+            line-height: 1.4;
+        }
+
+        .analysis-list li:last-child {
+            margin-bottom: 0;
+            padding-bottom: 0;
+            border-bottom: none;
+        }
+
+        .tag {
+            display: inline-block;
+            padding: 0.2rem 0.5rem;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: bold;
+            margin-right: 0.5rem;
+        }
+
+        .tag.high { background: #fee2e2; color: #991b1b; }
+        .tag.medium { background: #fef3c7; color: #92400e; }
+
+        .loader {
+            display: none;
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-light);
+            font-weight: 500;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>UniMelb UX/UI Analyzer</h1>
+    </header>
+
+    <div class="controls-section">
+        <form id="analyze-form" class="input-group">
+            <input type="url" id="url-input" placeholder="Enter UniMelb page URL (e.g., https://study.unimelb.edu.au/...)" required>
+            <button type="submit">Analyze Page</button>
+        </form>
+    </div>
+
+    <main class="main-content">
+        <div class="preview-pane">
+            <div class="pane-header" id="browser-bar">Live Preview: Waiting for input...</div>
+            <iframe id="site-frame" src="about:blank" title="Site Preview"></iframe>
+        </div>
+
+        <div class="analysis-pane" id="analysis-dashboard">
+            <div id="loader" class="loader">
+                Running heuristic UX evaluation...
+            </div>
+            
+            <div id="results-container" class="hidden">
+                <div class="card excessive">
+                    <h2>Excessive Content</h2>
+                    <ul class="analysis-list" id="list-excessive"></ul>
+                </div>
+
+                <div class="card flaws">
+                    <h2>Highlighted Flaws</h2>
+                    <ul class="analysis-list" id="list-flaws"></ul>
+                </div>
+
+                <div class="card duplicates">
+                    <h2>Duplicate Pages / Info</h2>
+                    <ul class="analysis-list" id="list-duplicates"></ul>
+                </div>
+
+                <div class="card improvements">
+                    <h2>Suggested Improvements</h2>
+                    <ul class="analysis-list" id="list-improvements"></ul>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        document.getElementById('analyze-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const urlInput = document.getElementById('url-input').value;
+            const iframe = document.getElementById('site-frame');
+            const browserBar = document.getElementById('browser-bar');
+            const loader = document.getElementById('loader');
+            const resultsContainer = document.getElementById('results-container');
+
+            // Set iframe and browser bar
+            browserBar.textContent = `Live Preview: ${urlInput}`;
+            // Note: X-Frame-Options may block some sites in a real browser. 
+            // In a production tool, this would be routed through a proxy.
+            iframe.src = urlInput;
+
+            // UI State change
+            resultsContainer.classList.add('hidden');
+            loader.style.display = 'block';
+
+            // Simulate analysis time
+            setTimeout(() => {
+                loader.style.display = 'none';
+                generateMockAnalysis(urlInput);
+                resultsContainer.classList.remove('hidden');
+            }, 1500);
+        });
+
+        function generateMockAnalysis(url) {
+            // Simulated NLP/Heuristic Analysis outputs based on the URL
+            
+            const excessiveData = [
+                "<strong>Text Density:</strong> The hero section contains over 300 words. Consider condensing to a 50-word summary.",
+                "<strong>Redundant Navigation:</strong> The footer contains the exact same nested links as the mega-menu.",
+                "<strong>Overused Accordions:</strong> 12 accordion items on one page forces cognitive overload. Group into distinct pages."
+            ];
+
+            const flawsData = [
+                "<span class='tag high'>High</span> <strong>Contrast Ratio:</strong> Light grey text (#999999) on white background fails WCAG 2.1 AA standards.",
+                "<span class='tag high'>High</span> <strong>Call to Action:</strong> The 'Apply Now' button is hidden below the fold.",
+                "<span class='tag medium'>Medium</span> <strong>Mobile Responsiveness:</strong> Data tables overflow the viewport width on screens under 768px."
+            ];
+
+            const duplicatesData = [
+                "<strong>Entry Requirements:</strong> This information is duplicated on the 'Admissions' page and the 'Course Overview' page. Unify under a single source of truth.",
+                "<strong>Staff Profiles:</strong> Found conflicting contact information compared to the central directory index."
+            ];
+
+            const improvementsData = [
+                "<strong>Information Architecture:</strong> Implement a sticky table of contents for long-form faculty pages to aid scannability.",
+                "<strong>Visual Hierarchy:</strong> Increase the font-weight of secondary headings (H3) to break up large text blocks.",
+                "<strong>Progressive Disclosure:</strong> Use 'Read More' interactions for lengthy course descriptions to keep the initial page load clean."
+            ];
+
+            populateList('list-excessive', excessiveData);
+            populateList('list-flaws', flawsData);
+            populateList('list-duplicates', duplicatesData);
+            populateList('list-improvements', improvementsData);
+        }
+
+        function populateList(elementId, dataArray) {
+            const listElement = document.getElementById(elementId);
+            listElement.innerHTML = ''; // Clear previous
+            dataArray.forEach(item => {
+                const li = document.createElement('li');
+                li.innerHTML = item;
+                listElement.appendChild(li);
+            });
+        }
+    </script>
+</body>
+</html>
