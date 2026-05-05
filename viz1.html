@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Audio-Reactive Glimmer Field (Fullscreen & Dynamic Colors)</title>
+    <title>High-Definition Glimmer Field</title>
     <style>
         body, html {
             margin: 0;
@@ -59,7 +59,7 @@
 </head>
 <body>
     <div id="overlay">
-        <div class="pulse-text">Click to Start <br> Fullscreen Engine</div>
+        <div class="pulse-text">Click to Start <br> High-Def Engine</div>
         <div class="sub-text">This requires microphone access. (Press ESC to exit fullscreen later)</div>
     </div>
     <canvas id="glcanvas"></canvas>
@@ -87,7 +87,6 @@
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                 analyser = audioCtx.createAnalyser();
                 analyser.fftSize = 256;
-                // High smoothing constant keeps the shapes smooth, but colors will still pop
                 analyser.smoothingTimeConstant = 0.92; 
 
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -111,20 +110,14 @@
             for(let i = 8; i < 48; i++) m += dataArray[i]; // Mids
             for(let i = 48; i < 110; i++) t += dataArray[i]; // Treble
             
-            // Normalize values
             audioData.bass = (b / 8) / 255.0;
             audioData.mid = (m / 40) / 255.0;
             audioData.treb = (t / 62) / 255.0;
         }
 
         document.getElementById('overlay').addEventListener('click', async function() {
-            // Trigger Fullscreen
             openFullscreen();
-            
-            // Initialize Audio
             await initAudio();
-            
-            // Fade out overlay
             this.style.opacity = '0';
             setTimeout(() => this.style.display = 'none', 1000);
         });
@@ -190,51 +183,49 @@
                 float turbulence = noise(p * 0.5 + time) * smoothRange(u_mid, 0.1, 0.6);
                 p += turbulence * 0.3;
 
-                // Cloud Density
+                // Cloud Density (Upgraded to 6 HD octaves for micro-detail)
                 float density = 0.0;
                 float scale = 1.0;
-                for (int i = 0; i < 4; i++) {
+                for (int i = 0; i < 6; i++) {
                     density += noise(p * scale) / scale;
                     scale *= 2.0;
                 }
                 
                 density = pow(density, smoothRange(u_bass, 1.8, 0.8));
-                density = smoothstep(0.3, 0.95 + u_treb * 0.4, density);
+                density = smoothstep(0.4, 0.95 + u_treb * 0.4, density);
 
                 // --- DYNAMIC COLOR SHIFTING LOGIC ---
-                // 'colorParam' decides where we are on the rainbow. It reacts to depth and bass.
                 float colorParam = density * 1.5 + (u_time * 0.05) - (u_bass * 1.5) + (u_mid * 0.8);
                 
                 vec3 a = vec3(0.5, 0.5, 0.5);
                 vec3 b = vec3(0.5, 0.5, 0.5);
                 vec3 c = vec3(1.0, 1.0, 1.0);
-                
-                // The phase pushes the colors around completely.
-                // Treble creates rapid, dramatic hue flashes.
                 vec3 phase = vec3(0.0, 0.33, 0.67) + (u_treb * 2.5) + (u_time * 0.1); 
                 
-                // Generate the base color from the palette
                 vec3 baseColor = palette(colorParam, a, b, c, phase);
-
-                // Darken empty space, colorize dense space
                 vec3 finalColor = baseColor * pow(density, 1.5);
                 
-                // Add intense white/gold glimmer on the high frequency peaks
-                float glimmerIntensity = pow(density, 8.0) * (u_treb * 4.0);
+                // --- HD SHARP GLIMMER ---
+                // Higher exponent (18.0) creates sharp, piercing light instead of soft blooms
+                float glimmerIntensity = pow(density, 18.0) * (u_treb * 5.0 + 0.2);
                 finalColor += vec3(1.0, 0.9, 0.8) * glimmerIntensity;
+
+                // --- PIXEL-PERFECT STAR GLITTER ---
+                // Reacts aggressively to high-hats/treble
+                float hqGlitter = fract(sin(dot(uv + time, vec2(12.9898, 78.233))) * 43758.5453);
+                finalColor += vec3(1.0, 0.8, 1.0) * pow(hqGlitter, 150.0) * (u_treb * 3.0);
 
                 // Vignette frame
                 float vignette = 1.0 - length(uv * 0.7);
                 finalColor *= vignette;
 
-                // Tone mapping (keeps colors saturated and bright)
+                // Tone mapping for bright, saturated colors
                 finalColor = 1.0 - exp(-finalColor * 2.5);
 
                 fragColor = vec4(finalColor, 1.0);
             }
         `;
 
-        // --- Shader Boilerplate ---
         function compileShader(gl, type, source) {
             const shader = gl.createShader(type);
             gl.shaderSource(shader, source);
@@ -269,7 +260,8 @@
         const locTreb = gl.getUniformLocation(program, "u_treb");
 
         function render(time) {
-            const dpr = Math.min(window.devicePixelRatio || 1, 2.0); 
+            // Uncapped Device Pixel Ratio - utilizes 100% of native screen hardware
+            const dpr = window.devicePixelRatio || 1; 
             const w = window.innerWidth * dpr;
             const h = window.innerHeight * dpr;
             if (canvas.width !== w || canvas.height !== h) {
