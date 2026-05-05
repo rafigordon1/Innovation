@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Audio-Reactive Glimmer Field (Smoothed)</title>
+    <title>Audio-Reactive Glimmer Field (Fullscreen & Dynamic Colors)</title>
     <style>
         body, html {
             margin: 0;
@@ -42,6 +42,7 @@
             letter-spacing: 0.2em;
             text-transform: uppercase;
             animation: pulse 2s infinite;
+            text-align: center;
         }
         .sub-text {
             margin-top: 20px;
@@ -58,12 +59,24 @@
 </head>
 <body>
     <div id="overlay">
-        <div class="pulse-text">Click to Start the Glimmer</div>
-        <div class="sub-text">This requires microphone access to visualize your audio. You may need to refresh if permissions are denied.</div>
+        <div class="pulse-text">Click to Start <br> Fullscreen Engine</div>
+        <div class="sub-text">This requires microphone access. (Press ESC to exit fullscreen later)</div>
     </div>
     <canvas id="glcanvas"></canvas>
 
     <script>
+        // --- FULLSCREEN HELPER ---
+        function openFullscreen() {
+            const elem = document.documentElement;
+            if (elem.requestFullscreen) {
+                elem.requestFullscreen();
+            } else if (elem.webkitRequestFullscreen) { /* Safari */
+                elem.webkitRequestFullscreen();
+            } else if (elem.msRequestFullscreen) { /* IE11 */
+                elem.msRequestFullscreen();
+            }
+        }
+
         // --- AUDIO ENGINE ---
         let audioCtx, analyser, dataArray;
         let audioData = { bass: 0, mid: 0, treb: 0 };
@@ -74,20 +87,18 @@
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                 analyser = audioCtx.createAnalyser();
                 analyser.fftSize = 256;
-                // High smoothing constant (0.95) to significantly reduce jitter
-                analyser.smoothingTimeConstant = 0.95; 
+                // High smoothing constant keeps the shapes smooth, but colors will still pop
+                analyser.smoothingTimeConstant = 0.92; 
 
-                // Requests microphone access
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 const source = audioCtx.createMediaStreamSource(stream);
                 source.connect(analyser);
                 
                 dataArray = new Uint8Array(analyser.frequencyBinCount);
                 audioInitialized = true;
-                console.log("Audio Engine Activated.");
             } catch (err) {
                 console.error("Audio initialization failed:", err);
-                alert("Microphone access is required for this visualization. Please check browser permissions and refresh.");
+                alert("Microphone access is required. Please check browser permissions and refresh.");
             }
         }
 
@@ -107,7 +118,13 @@
         }
 
         document.getElementById('overlay').addEventListener('click', async function() {
+            // Trigger Fullscreen
+            openFullscreen();
+            
+            // Initialize Audio
             await initAudio();
+            
+            // Fade out overlay
             this.style.opacity = '0';
             setTimeout(() => this.style.display = 'none', 1000);
         });
@@ -137,12 +154,11 @@
             uniform vec2 u_resolution;
             uniform float u_time;
             
-            // Audio Uniforms
             uniform float u_bass;
             uniform float u_mid;
             uniform float u_treb;
 
-            // 3D noise function for smooth volume
+            // 3D noise function
             float noise(vec3 p) {
                 vec3 i = floor(p);
                 vec3 f = fract(p);
@@ -154,26 +170,27 @@
                                mix( fract(sin(n+170.0)*43758.5453), fract(sin(n+171.0)*43758.5453),f.x),f.y),f.z);
             }
 
-            // Map audio values to smoother ranges
             float smoothRange(float val, float minV, float maxV) {
                 return minV + val * (maxV - minV);
             }
 
+            // Mathematical Color Palette Generator
+            vec3 palette( in float t, in vec3 a, in vec3 b, in vec3 c, in vec3 d ) {
+                return a + b*cos( 6.28318*(c*t+d) );
+            }
+
             void main() {
-                // Normalize coordinates
                 vec2 uv = (v_uv - 0.5) * 2.0;
                 uv.x *= u_resolution.x / u_resolution.y;
 
-                // Flow through noise space
-                float time = u_time * 0.15; // Slow down default flow
+                float time = u_time * 0.15; 
                 vec3 p = vec3(uv * 2.5, time);
                 
-                // --- Glimmer Field Mechanics ---
-                // Turbulence warps the space smoothly based on Mids
-                float turbulence = noise(p * 0.5 + time) * smoothRange(u_mid, 0.1, 0.5);
+                // Turbulence
+                float turbulence = noise(p * 0.5 + time) * smoothRange(u_mid, 0.1, 0.6);
                 p += turbulence * 0.3;
 
-                // Octaves of noise for a cloud structure
+                // Cloud Density
                 float density = 0.0;
                 float scale = 1.0;
                 for (int i = 0; i < 4; i++) {
@@ -181,25 +198,37 @@
                     scale *= 2.0;
                 }
                 
-                // Modulate density with Audio
-                // Bass drives overall size/depth. Treble drives edge sharpness.
-                density = pow(density, smoothRange(u_bass, 1.6, 0.9));
-                density = smoothstep(0.4, 0.95 + u_treb * 0.3, density);
+                density = pow(density, smoothRange(u_bass, 1.8, 0.8));
+                density = smoothstep(0.3, 0.95 + u_treb * 0.4, density);
 
-                // --- Coloring ---
-                vec3 colorDeep = vec3(0.01, 0.02, 0.08); // Black/Blue
-                vec3 colorMid = vec3(0.1, 0.4, 0.9);   // Electric Blue
-                vec3 colorHigh = vec3(1.0, 0.8, 0.95); // White Gold/Pink
+                // --- DYNAMIC COLOR SHIFTING LOGIC ---
+                // 'colorParam' decides where we are on the rainbow. It reacts to depth and bass.
+                float colorParam = density * 1.5 + (u_time * 0.05) - (u_bass * 1.5) + (u_mid * 0.8);
+                
+                vec3 a = vec3(0.5, 0.5, 0.5);
+                vec3 b = vec3(0.5, 0.5, 0.5);
+                vec3 c = vec3(1.0, 1.0, 1.0);
+                
+                // The phase pushes the colors around completely.
+                // Treble creates rapid, dramatic hue flashes.
+                vec3 phase = vec3(0.0, 0.33, 0.67) + (u_treb * 2.5) + (u_time * 0.1); 
+                
+                // Generate the base color from the palette
+                vec3 baseColor = palette(colorParam, a, b, c, phase);
 
-                // Blend colors based on density and treble energy
-                vec3 finalColor = mix(colorDeep, colorMid, density);
-                // Glimmer highlights respond sharply to high frequencies
-                float glimmerIntensity = pow(density, 10.0) * u_treb * 4.0;
-                finalColor = mix(finalColor, colorHigh, glimmerIntensity);
+                // Darken empty space, colorize dense space
+                vec3 finalColor = baseColor * pow(density, 1.5);
+                
+                // Add intense white/gold glimmer on the high frequency peaks
+                float glimmerIntensity = pow(density, 8.0) * (u_treb * 4.0);
+                finalColor += vec3(1.0, 0.9, 0.8) * glimmerIntensity;
 
-                // Vignette
+                // Vignette frame
                 float vignette = 1.0 - length(uv * 0.7);
                 finalColor *= vignette;
+
+                // Tone mapping (keeps colors saturated and bright)
+                finalColor = 1.0 - exp(-finalColor * 2.5);
 
                 fragColor = vec4(finalColor, 1.0);
             }
