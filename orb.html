@@ -2,15 +2,15 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Ultra HD Transparent WebGL Orb</title>
+  <title>Advanced Raymarched SDF Orb</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.js"></script>
   <style>
     body {
       margin: 0;
       padding: 0;
       overflow: hidden;
-      /* The body background is transparent to prove the floating effect */
-      background-color: transparent;
+      /* Background set to transparent to prove the alpha channel works */
+      background-color: transparent; 
     }
     canvas {
       display: block;
@@ -19,111 +19,176 @@
 </head>
 <body>
   <script>
-    let orbShader;
+    let raymarchShader;
 
-    // Vertex Shader: Handles 3D geometry and passes data to the fragment shader
+    // The vertex shader simply passes a flat quad that covers the screen.
+    // The actual 3D math happens entirely in the fragment shader.
     const vertShader = `
       attribute vec3 aPosition;
-      attribute vec2 aTexCoord;
-      attribute vec3 aNormal;
-
-      uniform mat4 uProjectionMatrix;
-      uniform mat4 uModelViewMatrix;
-
-      varying vec2 vTexCoord;
-      varying vec3 vNormal;
-      varying vec3 vPosition;
-
+      varying vec2 vUv;
       void main() {
-        vTexCoord = aTexCoord;
-        // Transform normal into view space
-        vNormal = normalize((uModelViewMatrix * vec4(aNormal, 0.0)).xyz);
-        
-        vec4 positionVec4 = vec4(aPosition, 1.0);
-        vPosition = positionVec4.xyz;
-        
-        gl_Position = uProjectionMatrix * uModelViewMatrix * positionVec4;
+        // Map p5's aPosition (-1 to 1) to UV coordinates (0 to 1)
+        vUv = aPosition.xy * 0.5 + 0.5;
+        // Flip Y for standard WebGL coordinates
+        vUv.y = 1.0 - vUv.y; 
+        gl_Position = vec4(aPosition, 1.0);
       }
     `;
 
-    // Fragment Shader: Handles the fluid iridescence, lighting, and transparency
+    // The fragment shader contains a custom 3D rendering engine (Raymarcher)
     const fragShader = `
       precision highp float;
 
-      varying vec2 vTexCoord;
-      varying vec3 vNormal;
-      varying vec3 vPosition;
+      varying vec2 vUv;
+      uniform vec2 u_resolution;
+      uniform float u_time;
 
-      uniform float uTime;
+      // 2D Rotation Matrix
+      mat2 rot(float a) {
+          float s = sin(a), c = cos(a);
+          return mat2(c, -s, s, c);
+      }
+
+      // Cosine based color palette (Inigo Quilez style)
+      vec3 palette( in float t ) {
+          vec3 a = vec3(0.5, 0.5, 0.5);
+          vec3 b = vec3(0.5, 0.5, 0.5);
+          vec3 c = vec3(1.0, 1.0, 1.0);
+          vec3 d = vec3(0.263, 0.416, 0.557);
+          return a + b * cos( 6.28318 * (c * t + d) );
+      }
+
+      // Signed Distance Field (SDF) mapping
+      // This defines the shape of our 3D universe
+      float map(vec3 p) {
+          vec3 p0 = p;
+          
+          // Domain warping and fractal folding
+          for(int i = 0; i < 4; i++) {
+              p.xy *= rot(u_time * 0.2);
+              p.yz *= rot(u_time * 0.15);
+              p = abs(p) - 0.4;
+          }
+          
+          // Highly displaced sphere base
+          float sphereDist = length(p0) - 1.5;
+          
+          // High-frequency intricate detail layer (the "butterchurn" fractal noise effect)
+          float detail = sin(p.x * 10.0) * sin(p.y * 10.0) * sin(p.z * 10.0) * 0.1;
+          float detail2 = cos(p.x * 25.0 + u_time) * cos(p.y * 25.0 - u_time) * cos(p.z * 25.0) * 0.05;
+          
+          // Smooth blending between the base sphere and the fractal noise
+          float displacement = detail + detail2;
+          
+          // Ensure the object stays relatively bounded like an orb
+          return max(sphereDist, length(p) - 0.8) + displacement;
+      }
+
+      // Calculate the normal of the SDF at a given point
+      vec3 getNormal(vec3 p) {
+          vec2 e = vec2(0.001, 0.0);
+          return normalize(vec3(
+              map(p + e.xyy) - map(p - e.xyy),
+              map(p + e.yxy) - map(p - e.yxy),
+              map(p + e.yyx) - map(p - e.yyx)
+          ));
+      }
 
       void main() {
-        vec3 n = normalize(vNormal);
-        vec3 viewDir = vec3(0.0, 0.0, 1.0);
+          // Normalize pixel coordinates (from -1 to 1) and fix aspect ratio
+          vec2 uv = (vUv - 0.5) * 2.0;
+          uv.x *= u_resolution.x / u_resolution.y;
 
-        // Volumetric noise simulation based on position and time
-        float noise = sin(vPosition.x * 0.015 + uTime * 1.2) * 
-                      sin(vPosition.y * 0.015 + uTime * 0.8) * 
-                      sin(vPosition.z * 0.015 - uTime * 1.5);
+          // Ray origin (Camera position)
+          vec3 ro = vec3(0.0, 0.0, 4.0);
+          
+          // Ray direction
+          vec3 rd = normalize(vec3(uv, -1.0));
 
-        // Ethereal/Fluid color palette
-        vec3 color1 = vec3(0.1, 0.5, 1.0); // Deep azure
-        vec3 color2 = vec3(0.9, 0.2, 0.7); // Vibrant magenta
-        vec3 color3 = vec3(0.0, 0.9, 0.7); // Luminous cyan
+          // Raymarching loop
+          float t = 0.0;     // Total distance travelled
+          float max_d = 10.0; // Max draw distance
+          int steps = 0;
+          
+          for(int i = 0; i < 100; i++) {
+              vec3 p = ro + rd * t;
+              float d = map(p); // Distance to nearest surface
+              
+              if(d < 0.001 || t > max_d) break;
+              t += d;
+              steps = i;
+          }
 
-        // Smooth organic mixing
-        float mixVal1 = smoothstep(-1.0, 1.0, sin(vPosition.y * 0.02 + uTime * 2.0 + noise * 8.0));
-        float mixVal2 = smoothstep(-1.0, 1.0, cos(vPosition.x * 0.02 - uTime * 1.5 + noise * 10.0));
+          // Default background: Black and Transparent (alpha = 0)
+          vec4 color = vec4(0.0, 0.0, 0.0, 0.0);
 
-        vec3 albedo = mix(color1, color2, mixVal1);
-        albedo = mix(albedo, color3, mixVal2);
+          // If we hit an object
+          if(t < max_d) {
+              vec3 p = ro + rd * t;
+              vec3 n = getNormal(p);
+              
+              // Light setup
+              vec3 lightPos = vec3(2.0 * sin(u_time), 3.0, 2.0 * cos(u_time));
+              vec3 l = normalize(lightPos - p);
+              vec3 viewDir = normalize(ro - p);
+              vec3 ref = reflect(-l, n);
+              
+              // Shading parameters
+              float diff = max(dot(n, l), 0.0);
+              float spec = pow(max(dot(viewDir, ref), 0.0), 64.0);
+              float fresnel = pow(1.0 - max(dot(n, viewDir), 0.0), 3.0);
+              
+              // Base color shifts based on the surface normal and time, yielding iridescence
+              vec3 albedo = palette(length(p) * 0.5 + u_time * 0.4 + n.x * 0.2);
+              
+              // Pseudo Ambient Occlusion based on ray steps (darkens deep crevices)
+              float ao = 1.0 - float(steps) / 100.0;
+              
+              // Combine lighting
+              vec3 lighting = albedo * (diff * 0.5 + 0.5) * ao;
+              lighting += spec * 1.5 * palette(u_time); // Chromatic specular highlights
+              lighting += fresnel * 1.2 * palette(u_time + 0.5); // Chromatic rim lighting
+              
+              // Output final color with solid alpha (1.0) where the object exists
+              color = vec4(lighting, 1.0);
+          } else {
+              // Add a slight volumetric glow behind the orb
+              float glow = exp(-length(uv) * 2.5);
+              vec3 glowColor = palette(u_time * 0.2) * glow * 0.3;
+              // Mix the glow over a black transparent base. 
+              // Using glow as alpha allows it to feather out into true transparency.
+              color = vec4(glowColor, glow * 0.5); 
+          }
 
-        // Blinn-Phong Lighting Setup
-        vec3 lightDir = normalize(vec3(1.0, 1.0, 1.0));
-        float diffuse = max(dot(n, lightDir), 0.0);
+          // Apply slight gamma correction
+          color.rgb = pow(color.rgb, vec3(1.0 / 2.2));
 
-        // High-gloss Specular highlight for a "touchable" glass-like surface
-        vec3 reflectDir = reflect(-lightDir, n);
-        float specular = pow(max(dot(viewDir, reflectDir), 0.0), 80.0);
-
-        // Fresnel effect for rim lighting
-        float fresnel = pow(1.0 - max(dot(n, viewDir), 0.0), 2.5);
-
-        // Combine lighting and colors
-        vec3 finalColor = albedo * (diffuse * 0.6 + 0.4) + vec3(specular * 1.2) + (fresnel * vec3(0.8, 0.9, 1.0));
-
-        // Smooth edge alpha drop-off to avoid jagged clipping on the transparent background
-        float edgeAlpha = smoothstep(0.0, 0.15, max(dot(n, viewDir), 0.0));
-
-        gl_FragColor = vec4(finalColor, edgeAlpha);
+          gl_FragColor = color;
       }
     `;
 
     function setup() {
-      // Initialize WebGL canvas
+      // WEBGL mode handles custom shaders
       createCanvas(windowWidth, windowHeight, WEBGL);
-      // Double the pixel density for ultra-high definition displays
-      pixelDensity(2); 
+      pixelDensity(2); // Retain high-definition pixel pushing
       
-      // Compile the shader
-      orbShader = createShader(vertShader, fragShader);
+      raymarchShader = createShader(vertShader, fragShader);
       noStroke();
     }
 
     function draw() {
-      // Clear with full transparency so it "floats" on the HTML background
+      // Clear with black, 0 alpha to ensure a transparent background
       clear(0, 0, 0, 0); 
 
-      // Activate shader and pass the time uniform
-      shader(orbShader);
-      orbShader.setUniform('uTime', millis() / 1000.0);
+      shader(raymarchShader);
+      
+      // Pass uniforms to the fragment shader
+      raymarchShader.setUniform('u_resolution', [width * pixelDensity(), height * pixelDensity()]);
+      raymarchShader.setUniform('u_time', millis() / 1000.0);
 
-      // Rotate the orb slowly to show off the 3D lighting
-      rotateY(millis() / 3000.0);
-      rotateX(millis() / 4000.0);
-
-      // Draw a high-resolution sphere (radius, detailX, detailY)
-      let radius = min(width, height) * 0.3;
-      sphere(radius, 150, 150); 
+      // Draw a screen-spanning rectangle. The custom 3D world exists entirely inside the shader.
+      rectMode(CENTER);
+      rect(0, 0, width, height);
     }
 
     function windowResized() {
