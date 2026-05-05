@@ -1,409 +1,268 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Interdimensional Nebula Field</title>
-    <style>
-        body, html {
-            margin: 0;
-            padding: 0;
-            width: 100vw;
-            height: 100vh;
-            overflow: hidden;
-            background-color: transparent; 
-            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-        }
-        canvas {
-            display: block;
-            width: 100%;
-            height: 100%;
-            position: absolute;
-            top: 0;
-            left: 0;
-            z-index: 1;
-        }
-        #overlay {
-            position: absolute;
-            top: 0; left: 0; width: 100%; height: 100%;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            background: rgba(0, 0, 0, 0.9);
-            color: #fff;
-            z-index: 10;
-            cursor: pointer;
-            transition: opacity 1s ease-in-out;
-            backdrop-filter: blur(10px);
-        }
-        .pulse-text {
-            font-size: 1.2rem;
-            letter-spacing: 0.2em;
-            text-transform: uppercase;
-            animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-            0%, 100% { opacity: 0.5; }
-            50% { opacity: 1; text-shadow: 0 0 20px rgba(255,255,255,0.5); }
-        }
-    </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio-Reactive Glimmer Field (Smoothed)</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            background-color: #000; 
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            color: #fff;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+        #overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.9);
+            z-index: 10;
+            cursor: pointer;
+            transition: opacity 1s ease-in-out;
+            backdrop-filter: blur(10px);
+        }
+        .pulse-text {
+            font-size: 1.2rem;
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+            animation: pulse 2s infinite;
+        }
+        .sub-text {
+            margin-top: 20px;
+            font-size: 0.9rem;
+            opacity: 0.7;
+            text-align: center;
+            max-width: 400px;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 0.5; }
+            50% { opacity: 1; text-shadow: 0 0 20px rgba(255,255,255,0.5); }
+        }
+    </style>
 </head>
 <body>
-    <div id="overlay">
-        <div class="pulse-text">Click to Activate the Nebula Core</div>
-    </div>
-    <canvas id="glcanvas"></canvas>
+    <div id="overlay">
+        <div class="pulse-text">Click to Start the Glimmer</div>
+        <div class="sub-text">This requires microphone access to visualize your audio. You may need to refresh if permissions are denied.</div>
+    </div>
+    <canvas id="glcanvas"></canvas>
 
-    <script>
-        // --- AUDIO ENGINE (Same Methodology) ---
-        let audioCtx, analyser, dataArray;
-        let audioData = { bass: 0, mid: 0, treb: 0 };
-        let audioInitialized = false;
+    <script>
+        // --- AUDIO ENGINE ---
+        let audioCtx, analyser, dataArray;
+        let audioData = { bass: 0, mid: 0, treb: 0 };
+        let audioInitialized = false;
 
-        async function initAudio() {
-            try {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                analyser = audioCtx.createAnalyser();
-                analyser.fftSize = 256;
-                analyser.smoothingTimeConstant = 0.9; // Slightly smoother than original
+        async function initAudio() {
+            try {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 256;
+                // High smoothing constant (0.95) to significantly reduce jitter
+                analyser.smoothingTimeConstant = 0.95; 
 
-                // Requests microphone.
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                const source = audioCtx.createMediaStreamSource(stream);
-                source.connect(analyser);
-                
-                dataArray = new Uint8Array(analyser.frequencyBinCount);
-                audioInitialized = true;
-            } catch (err) {
-                console.error("Audio initialization failed:", err);
-                alert("Microphone access is required for the audio-reactive simulation.");
-            }
-        }
+                // Requests microphone access
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const source = audioCtx.createMediaStreamSource(stream);
+                source.connect(analyser);
+                
+                dataArray = new Uint8Array(analyser.frequencyBinCount);
+                audioInitialized = true;
+                console.log("Audio Engine Activated.");
+            } catch (err) {
+                console.error("Audio initialization failed:", err);
+                alert("Microphone access is required for this visualization. Please check browser permissions and refresh.");
+            }
+        }
 
-        function updateAudioData() {
-            if (!audioInitialized) return;
-            analyser.getByteFrequencyData(dataArray);
-            
-            // Isolate frequency bands
-            let b = 0, m = 0, t = 0;
-            for(let i = 0; i < 8; i++) b += dataArray[i];
-            for(let i = 8; i < 40; i++) m += dataArray[i];
-            for(let i = 40; i < 110; i++) t += dataArray[i];
-            
-            // Normalize values
-            audioData.bass = (b / 8) / 255.0;
-            audioData.mid = (m / 32) / 255.0;
-            audioData.treb = (t / 70) / 255.0;
-        }
+        function updateAudioData() {
+            if (!audioInitialized) return;
+            analyser.getByteFrequencyData(dataArray);
+            
+            let b = 0, m = 0, t = 0;
+            for(let i = 0; i < 8; i++) b += dataArray[i]; // Deep Bass
+            for(let i = 8; i < 48; i++) m += dataArray[i]; // Mids
+            for(let i = 48; i < 110; i++) t += dataArray[i]; // Treble
+            
+            // Normalize values
+            audioData.bass = (b / 8) / 255.0;
+            audioData.mid = (m / 40) / 255.0;
+            audioData.treb = (t / 62) / 255.0;
+        }
 
-        document.getElementById('overlay').addEventListener('click', async function() {
-            await initAudio();
-            this.style.opacity = '0';
-            setTimeout(() => this.style.display = 'none', 1000);
-        });
+        document.getElementById('overlay').addEventListener('click', async function() {
+            await initAudio();
+            this.style.opacity = '0';
+            setTimeout(() => this.style.display = 'none', 1000);
+        });
 
-        // --- WEBGL ENGINE (Same Methodology) ---
-        const canvas = document.getElementById('glcanvas');
-        const gl = canvas.getContext('webgl2', { alpha: true, antialias: true, premultipliedAlpha: false });
+        // --- WEBGL ENGINE ---
+        const canvas = document.getElementById('glcanvas');
+        const gl = canvas.getContext('webgl2', { alpha: true, antialias: true });
 
-        const vsSource = `#version 300 es
-            in vec2 a_position;
-            out vec2 v_uv;
-            void main() {
-                v_uv = a_position * 0.5 + 0.5;
-                gl_Position = vec4(a_position, 0.0, 1.0);
-            }
-        `;
+        if (!gl) {
+            alert("WebGL 2 not supported on this browser.");
+        }
 
-        const fsSource = `#version 300 es
-            precision highp float;
-            in vec2 v_uv;
-            out vec4 fragColor;
+        const vsSource = `#version 300 es
+            in vec2 a_position;
+            out vec2 v_uv;
+            void main() {
+                v_uv = a_position * 0.5 + 0.5;
+                gl_Position = vec4(a_position, 0.0, 1.0);
+            }
+        `;
 
-            uniform vec2 u_resolution;
-            uniform float u_time;
-            uniform float u_bass;
-            uniform float u_mid;
-            uniform float u_treb;
+        const fsSource = `#version 300 es
+            precision highp float;
+            in vec2 v_uv;
+            out vec4 fragColor;
 
-            // IQ's integer gradient noise
-            float noise(vec3 p) {
-                vec3 i = floor(p);
-                vec3 f = fract(p);
-                f = f * f * (3.0 - 2.0 * f);
-                float n = i.x + i.y * 57.0 + 113.0 * i.z;
-                float a = fract(sin(n) * 43758.545);
-                float b = fract(sin(n + 1.0) * 43758.545);
-                float c = fract(sin(n + 57.0) * 43758.545);
-                float d = fract(sin(n + 58.0) * 43758.545);
-                float e = fract(sin(n + 113.0) * 43758.545);
-                float g = fract(sin(n + 114.0) * 43758.545);
-                float h = fract(sin(n + 170.0) * 43758.545);
-                float k = fract(sin(n + 171.0) * 43758.545);
-                return mix(mix(mix(a, b, f.x), mix(c, d, f.x), f.y),
-```html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Audio-Reactive Glimmer Field</title>
-    <style>
-        body, html {
-            margin: 0;
-            padding: 0;
-            width: 100vw;
-            height: 100vh;
-            overflow: hidden;
-            background-color: #000; 
-            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-            color: #fff;
-        }
-        canvas {
-            display: block;
-            width: 100%;
-            height: 100%;
-            position: absolute;
-            top: 0;
-            left: 0;
-            z-index: 1;
-        }
-        #overlay {
-            position: absolute;
-            top: 0; left: 0; width: 100%; height: 100%;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            background: rgba(0, 0, 0, 0.9);
-            z-index: 10;
-            cursor: pointer;
-            transition: opacity 1s ease-in-out;
-            backdrop-filter: blur(10px);
-        }
-        .pulse-text {
-            font-size: 1.2rem;
-            letter-spacing: 0.2em;
-            text-transform: uppercase;
-            animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-            0%, 100% { opacity: 0.5; }
-            50% { opacity: 1; text-shadow: 0 0 20px rgba(255,255,255,0.5); }
-        }
-    </style>
-</head>
-<body>
-    <div id="overlay">
-        <div class="pulse-text">Click to Start the Glimmer</div>
-    </div>
-    <canvas id="glcanvas"></canvas>
+            uniform vec2 u_resolution;
+            uniform float u_time;
+            
+            // Audio Uniforms
+            uniform float u_bass;
+            uniform float u_mid;
+            uniform float u_treb;
 
-    <script>
-        // --- AUDIO ENGINE (Same methodology) ---
-        let audioCtx, analyser, dataArray;
-        let audioData = { bass: 0, mid: 0, treb: 0 };
-        let audioInitialized = false;
+            // 3D noise function for smooth volume
+            float noise(vec3 p) {
+                vec3 i = floor(p);
+                vec3 f = fract(p);
+                f = f*f*(3.0-2.0*f);
+                float n = i.x + i.y*57.0 + 113.0*i.z;
+                return mix(mix(mix( fract(sin(n)*43758.5453), fract(sin(n+1.0)*43758.5453),f.x),
+                               mix( fract(sin(n+57.0)*43758.5453), fract(sin(n+58.0)*43758.5453),f.x),f.y),
+                           mix(mix( fract(sin(n+113.0)*43758.5453), fract(sin(n+114.0)*43758.5453),f.x),
+                               mix( fract(sin(n+170.0)*43758.5453), fract(sin(n+171.0)*43758.5453),f.x),f.y),f.z);
+            }
 
-        async function initAudio() {
-            try {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                analyser = audioCtx.createAnalyser();
-                analyser.fftSize = 256;
-                // Set a high smoothing constant to significantly reduce jitter
-                analyser.smoothingTimeConstant = 0.95; 
+            // Map audio values to smoother ranges
+            float smoothRange(float val, float minV, float maxV) {
+                return minV + val * (maxV - minV);
+            }
 
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                const source = audioCtx.createMediaStreamSource(stream);
-                source.connect(analyser);
-                
-                dataArray = new Uint8Array(analyser.frequencyBinCount);
-                audioInitialized = true;
-            } catch (err) {
-                console.error("Audio initialization failed:", err);
-                alert("Microphone access is required for this visualization.");
-            }
-        }
+            void main() {
+                // Normalize coordinates
+                vec2 uv = (v_uv - 0.5) * 2.0;
+                uv.x *= u_resolution.x / u_resolution.y;
 
-        function updateAudioData() {
-            if (!audioInitialized) return;
-            analyser.getByteFrequencyData(dataArray);
-            
-            // Isolate bands
-            let b = 0, m = 0, t = 0;
-            for(let i = 0; i < 8; i++) b += dataArray[i]; // Deep Bass
-            for(let i = 8; i < 48; i++) m += dataArray[i]; // Mids
-            for(let i = 48; i < 110; i++) t += dataArray[i]; // Treble
-            
-            // Normalize
-            audioData.bass = (b / 8) / 255.0;
-            audioData.mid = (m / 40) / 255.0;
-            audioData.treb = (t / 62) / 255.0;
-        }
+                // Flow through noise space
+                float time = u_time * 0.15; // Slow down default flow
+                vec3 p = vec3(uv * 2.5, time);
+                
+                // --- Glimmer Field Mechanics ---
+                // Turbulence warps the space smoothly based on Mids
+                float turbulence = noise(p * 0.5 + time) * smoothRange(u_mid, 0.1, 0.5);
+                p += turbulence * 0.3;
 
-        document.getElementById('overlay').addEventListener('click', async function() {
-            await initAudio();
-            this.style.opacity = '0';
-            setTimeout(() => this.style.display = 'none', 1000);
-        });
+                // Octaves of noise for a cloud structure
+                float density = 0.0;
+                float scale = 1.0;
+                for (int i = 0; i < 4; i++) {
+                    density += noise(p * scale) / scale;
+                    scale *= 2.0;
+                }
+                
+                // Modulate density with Audio
+                // Bass drives overall size/depth. Treble drives edge sharpness.
+                density = pow(density, smoothRange(u_bass, 1.6, 0.9));
+                density = smoothstep(0.4, 0.95 + u_treb * 0.3, density);
 
-        // --- WEBGL ENGINE (Same methodology) ---
-        const canvas = document.getElementById('glcanvas');
-        // We need alpha for smooth blending against the background
-        const gl = canvas.getContext('webgl2', { alpha: true, antialias: true, premultipliedAlpha: false });
+                // --- Coloring ---
+                vec3 colorDeep = vec3(0.01, 0.02, 0.08); // Black/Blue
+                vec3 colorMid = vec3(0.1, 0.4, 0.9);   // Electric Blue
+                vec3 colorHigh = vec3(1.0, 0.8, 0.95); // White Gold/Pink
 
-        const vsSource = `#version 300 es
-            in vec2 a_position;
-            out vec2 v_uv;
-            void main() {
-                v_uv = a_position * 0.5 + 0.5;
-                gl_Position = vec4(a_position, 0.0, 1.0);
-            }
-        `;
+                // Blend colors based on density and treble energy
+                vec3 finalColor = mix(colorDeep, colorMid, density);
+                // Glimmer highlights respond sharply to high frequencies
+                float glimmerIntensity = pow(density, 10.0) * u_treb * 4.0;
+                finalColor = mix(finalColor, colorHigh, glimmerIntensity);
 
-        const fsSource = `#version 300 es
-            precision highp float;
-            in vec2 v_uv;
-            out vec4 fragColor;
+                // Vignette
+                float vignette = 1.0 - length(uv * 0.7);
+                finalColor *= vignette;
 
-            uniform vec2 u_resolution;
-            uniform float u_time;
-            
-            // Audio Uniforms
-            uniform float u_bass;
-            uniform float u_mid;
-            uniform float u_treb;
+                fragColor = vec4(finalColor, 1.0);
+            }
+        `;
 
-            // 3D noise function for smooth volume
-            float noise(vec3 p) {
-                vec3 i = floor(p);
-                vec3 f = fract(p);
-                f = f*f*(3.0-2.0*f);
-                float n = i.x + i.y*57.0 + 113.0*i.z;
-                return mix(mix(mix( fract(sin(n)*43758.5453), fract(sin(n+1.0)*43758.5453),f.x),
-                           mix( fract(sin(n+57.0)*43758.5453), fract(sin(n+58.0)*43758.5453),f.x),f.y),
-                       mix(mix( fract(sin(n+113.0)*43758.5453), fract(sin(n+114.0)*43758.5453),f.x),
-                           mix( fract(sin(n+170.0)*43758.5453), fract(sin(n+171.0)*43758.5453),f.x),f.y),f.z);
-            }
+        // --- Shader Boilerplate ---
+        function compileShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error("Shader Compile Error:", gl.getShaderInfoLog(shader));
+                return null;
+            }
+            return shader;
+        }
 
-            // Map audio values to smoother ranges
-            float smoothRange(float val, float minV, float maxV) {
-                return minV + val * (maxV - minV);
-            }
+        const program = gl.createProgram();
+        gl.attachShader(program, compileShader(gl, gl.VERTEX_SHADER, vsSource));
+        gl.attachShader(program, compileShader(gl, gl.FRAGMENT_SHADER, fsSource));
+        gl.linkProgram(program);
+        gl.useProgram(program);
 
-            void main() {
-                // Normalize coordinates
-                vec2 uv = (v_uv - 0.5) * 2.0;
-                uv.x *= u_resolution.x / u_resolution.y;
+        const vertices = new Float32Array([-1, -1, 3, -1, -1, 3]);
+        const vao = gl.createVertexArray();
+        gl.bindVertexArray(vao);
+        const vbo = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+        gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+        const posAttrib = gl.getAttribLocation(program, "a_position");
+        gl.enableVertexAttribArray(posAttrib);
+        gl.vertexAttribPointer(posAttrib, 2, gl.FLOAT, false, 0, 0);
 
-                // Create a flowing, 3D 'ray' through noise space
-                float time = u_time * 0.2;
-                
-                // The base coordinates flow forward in 'time' Z
-                vec3 p = vec3(uv * 2.5, time);
-                
-                // --- Glimmer Field Mechanics ---
-                // 1. Turbulence driven by Mids and Treble, warps the space smoothly
-                float turbulence = noise(p * 0.5 + time) * smoothRange(u_mid, 0.2, 0.8) + 
-                                   noise(p * 3.0 - time * 2.0) * smoothRange(u_treb, 0.05, 0.2);
-                p += turbulence * 0.3;
+        const locRes = gl.getUniformLocation(program, "u_resolution");
+        const locTime = gl.getUniformLocation(program, "u_time");
+        const locBass = gl.getUniformLocation(program, "u_bass");
+        const locMid = gl.getUniformLocation(program, "u_mid");
+        const locTreb = gl.getUniformLocation(program, "u_treb");
 
-                // 2. Generate multiple octaves of smooth noise to form a cloud
-                float density = 0.0;
-                float scale = 1.0;
-                for (int i = 0; i < 4; i++) {
-                    density += noise(p * scale) / scale;
-                    scale *= 2.0;
-                }
-                
-                // 3. Modulate density with audio
-                // Bass drives the overall amplitude (cloud expands)
-                // Treble defines the 'edge' sharpness/glimmer
-                density = pow(density, smoothRange(u_bass, 1.5, 0.8));
-                density = smoothstep(0.4, 0.9 + u_treb * 0.3, density);
+        function render(time) {
+            const dpr = Math.min(window.devicePixelRatio || 1, 2.0); 
+            const w = window.innerWidth * dpr;
+            const h = window.innerHeight * dpr;
+            if (canvas.width !== w || canvas.height !== h) {
+                canvas.width = w; canvas.height = h;
+                gl.viewport(0, 0, w, h);
+            }
 
-                // --- Coloring ---
-                // Deep colors for background, bright energy for glimmers
-                vec3 colorDeep = vec3(0.01, 0.02, 0.08); // Near Black Blue
-                vec3 colorMid = vec3(0.1, 0.4, 0.9);   // Electric Blue
-                vec3 colorHigh = vec3(1.0, 0.8, 0.95); // White Gold/Pink
+            updateAudioData();
 
-                // Blend colors based on density (depth) and treble energy
-                vec3 finalColor = mix(colorDeep, colorMid, density);
-                // Glimmer highlights respond sharply to high frequencies
-                float glimmerIntensity = pow(density, 8.0) * u_treb * 5.0;
-                finalColor = mix(finalColor, colorHigh, glimmerIntensity);
+            gl.clear(gl.COLOR_BUFFER_BIT);
 
-                // 4. Soft vignette to frame the center
-                float vignette = 1.0 - length(uv * 0.6);
-                finalColor *= vignette;
+            gl.uniform2f(locRes, canvas.width, canvas.height);
+            gl.uniform1f(locTime, time * 0.001);
+            gl.uniform1f(locBass, audioData.bass);
+            gl.uniform1f(locMid, audioData.mid);
+            gl.uniform1f(locTreb, audioData.treb);
 
-                // filmlike tone mapping (simplified)
-                finalColor = 1.0 - exp(-finalColor * 2.0);
-                finalColor = pow(finalColor, vec3(1.0/2.2)); // Gamma correction
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+            requestAnimationFrame(render);
+        }
 
-                fragColor = vec4(finalColor, 1.0);
-            }
-        `;
-
-        // --- BOILERPLATE (Same as original) ---
-        function compileShader(gl, type, source) {
-            const shader = gl.createShader(type);
-            gl.shaderSource(shader, source);
-            gl.compileShader(shader);
-            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-                console.error("Shader Compile Error:", gl.getShaderInfoLog(shader));
-                return null;
-            }
-            return shader;
-        }
-
-        const program = gl.createProgram();
-        gl.attachShader(program, compileShader(gl, gl.VERTEX_SHADER, vsSource));
-        gl.attachShader(program, compileShader(gl, gl.FRAGMENT_SHADER, fsSource));
-        gl.linkProgram(program);
-        gl.useProgram(program);
-
-        const vertices = new Float32Array([-1, -1, 3, -1, -1, 3]);
-        const vao = gl.createVertexArray();
-        gl.bindVertexArray(vao);
-        const vbo = gl.createBuffer();
-        gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
-        gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
-        const posAttrib = gl.getAttribLocation(program, "a_position");
-        gl.enableVertexAttribArray(posAttrib);
-        gl.vertexAttribPointer(posAttrib, 2, gl.FLOAT, false, 0, 0);
-
-        const locRes = gl.getUniformLocation(program, "u_resolution");
-        const locTime = gl.getUniformLocation(program, "u_time");
-        const locBass = gl.getUniformLocation(program, "u_bass");
-        const locMid = gl.getUniformLocation(program, "u_mid");
-        const locTreb = gl.getUniformLocation(program, "u_treb");
-
-        function render(time) {
-            const dpr = Math.min(window.devicePixelRatio || 1, 2.0); 
-            const w = window.innerWidth * dpr;
-            const h = window.innerHeight * dpr;
-            if (canvas.width !== w || canvas.height !== h) {
-                canvas.width = w; canvas.height = h;
-                gl.viewport(0, 0, w, h);
-            }
-
-            updateAudioData();
-
-            gl.clearColor(0.0, 0.0, 0.0, 0.0);
-            gl.clear(gl.COLOR_BUFFER_BIT);
-
-            gl.uniform2f(locRes, canvas.width, canvas.height);
-            gl.uniform1f(locTime, time * 0.001);
-            gl.uniform1f(locBass, audioData.bass);
-            gl.uniform1f(locMid, audioData.mid);
-            gl.uniform1f(locTreb, audioData.treb);
-
-            gl.drawArrays(gl.TRIANGLES, 0, 3);
-            requestAnimationFrame(render);
-        }
-
-        requestAnimationFrame(render);
-    </script>
+        requestAnimationFrame(render);
+    </script>
 </body>
 </html>
