@@ -1,134 +1,371 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Ultra HD Transparent WebGL Orb</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.js"></script>
-  <style>
-    body {
-      margin: 0;
-      padding: 0;
-      overflow: hidden;
-      /* The body background is transparent to prove the floating effect */
-      background-color: transparent;
-    }
-    canvas {
-      display: block;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>High-Threshold Quantum Mandelbulb</title>
+    <style>
+        body, html {
+            margin: 0; padding: 0;
+            width: 100vw; height: 100vh;
+            overflow: hidden;
+            background-color: transparent; 
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+        }
+        canvas {
+            display: block; width: 100%; height: 100%;
+            position: absolute; top: 0; left: 0; z-index: 1;
+        }
+        #overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            background: rgba(0, 0, 0, 0.9);
+            color: #fff; z-index: 10; cursor: pointer;
+            transition: opacity 1s ease-in-out; backdrop-filter: blur(10px);
+        }
+        .pulse-text {
+            font-size: 1.2rem; letter-spacing: 0.2em; text-transform: uppercase;
+            animation: pulse 2s infinite; margin-bottom: 10px;
+        }
+        .sub-text {
+            font-size: 0.8rem; opacity: 0.6; letter-spacing: 0.1em;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 0.5; }
+            50% { opacity: 1; text-shadow: 0 0 20px rgba(0, 255, 255, 0.8); }
+        }
+    </style>
 </head>
 <body>
-  <script>
-    let orbShader;
+    <div id="overlay">
+        <div class="pulse-text">Click to Ignite High-Threshold Engine</div>
+        <div class="sub-text">Requires very loud audio to morph</div>
+    </div>
+    <canvas id="glcanvas"></canvas>
 
-    // Vertex Shader: Handles 3D geometry and passes data to the fragment shader
-    const vertShader = `
-      attribute vec3 aPosition;
-      attribute vec2 aTexCoord;
-      attribute vec3 aNormal;
+    <script>
+        // --- AUDIO ENGINE ---
+        let audioCtx, analyser, dataArray;
+        let audioTexture;
+        let audioInitialized = false;
+        let globalSmoothedEnergy = 0.0;
 
-      uniform mat4 uProjectionMatrix;
-      uniform mat4 uModelViewMatrix;
+        async function initAudio(gl) {
+            try {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 512; 
+                // HIGH SMOOTHING: Kills the jitter. Makes movements fluid and heavy.
+                analyser.smoothingTimeConstant = 0.94; 
+                
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const source = audioCtx.createMediaStreamSource(stream);
+                source.connect(analyser);
+                
+                dataArray = new Uint8Array(analyser.frequencyBinCount);
+                
+                audioTexture = gl.createTexture();
+                gl.bindTexture(gl.TEXTURE_2D, audioTexture);
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, 256, 1, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, dataArray);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
-      varying vec2 vTexCoord;
-      varying vec3 vNormal;
-      varying vec3 vPosition;
+                audioInitialized = true;
+            } catch (err) {
+                console.error("Audio init failed:", err);
+                alert("Microphone required for FFT mapping.");
+            }
+        }
 
-      void main() {
-        vTexCoord = aTexCoord;
-        // Transform normal into view space
-        vNormal = normalize((uModelViewMatrix * vec4(aNormal, 0.0)).xyz);
-        
-        vec4 positionVec4 = vec4(aPosition, 1.0);
-        vPosition = positionVec4.xyz;
-        
-        gl_Position = uProjectionMatrix * uModelViewMatrix * positionVec4;
-      }
-    `;
+        function updateAudioEngine(gl) {
+            if (!audioInitialized) return;
+            analyser.getByteFrequencyData(dataArray);
+            
+            // 1. Calculate Macroscopic Room Energy (with a hard noise gate)
+            let currentEnergy = 0;
+            let gateThreshold = 160; // Ignore all noise below this raw value (approx 65% volume)
+            let activeBands = 0;
 
-    // Fragment Shader: Handles the fluid iridescence, lighting, and transparency
-    const fragShader = `
-      precision highp float;
+            for(let i = 0; i < dataArray.length; i++) {
+                if(dataArray[i] > gateThreshold) {
+                    // Exponentially scale loud bands
+                    currentEnergy += Math.pow((dataArray[i] - gateThreshold) / (255 - gateThreshold), 2.0);
+                    activeBands++;
+                }
+            }
+            
+            // Normalize energy
+            currentEnergy = activeBands > 0 ? (currentEnergy / dataArray.length) * 10.0 : 0.0;
+            
+            // Smooth the global energy so the fractal morphs heavily but gracefully
+            globalSmoothedEnergy += (currentEnergy - globalSmoothedEnergy) * 0.02;
 
-      varying vec2 vTexCoord;
-      varying vec3 vNormal;
-      varying vec3 vPosition;
+            // 2. Update the WebGL texture for specific frequency sampling
+            gl.bindTexture(gl.TEXTURE_2D, audioTexture);
+            gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 256, 1, gl.LUMINANCE, gl.UNSIGNED_BYTE, dataArray);
+        }
 
-      uniform float uTime;
+        document.getElementById('overlay').addEventListener('click', async function() {
+            await initAudio(gl);
+            this.style.opacity = '0';
+            setTimeout(() => this.style.display = 'none', 1000);
+        });
 
-      void main() {
-        vec3 n = normalize(vNormal);
-        vec3 viewDir = vec3(0.0, 0.0, 1.0);
+        // --- WEBGL 2 ENGINE ---
+        const canvas = document.getElementById('glcanvas');
+        const gl = canvas.getContext('webgl2', { alpha: true, antialias: true, premultipliedAlpha: false });
 
-        // Volumetric noise simulation based on position and time
-        float noise = sin(vPosition.x * 0.015 + uTime * 1.2) * 
-                      sin(vPosition.y * 0.015 + uTime * 0.8) * 
-                      sin(vPosition.z * 0.015 - uTime * 1.5);
+        const vsSource = `#version 300 es
+            in vec2 a_position;
+            out vec2 v_uv;
+            void main() {
+                v_uv = a_position * 0.5 + 0.5;
+                gl_Position = vec4(a_position, 0.0, 1.0);
+            }
+        `;
 
-        // Ethereal/Fluid color palette
-        vec3 color1 = vec3(0.1, 0.5, 1.0); // Deep azure
-        vec3 color2 = vec3(0.9, 0.2, 0.7); // Vibrant magenta
-        vec3 color3 = vec3(0.0, 0.9, 0.7); // Luminous cyan
+        const fsSource = `#version 300 es
+            precision highp float;
+            
+            in vec2 v_uv;
+            out vec4 fragColor;
 
-        // Smooth organic mixing
-        float mixVal1 = smoothstep(-1.0, 1.0, sin(vPosition.y * 0.02 + uTime * 2.0 + noise * 8.0));
-        float mixVal2 = smoothstep(-1.0, 1.0, cos(vPosition.x * 0.02 - uTime * 1.5 + noise * 10.0));
+            uniform vec2 u_resolution;
+            uniform float u_time;
+            uniform sampler2D u_audioTex;
+            uniform float u_energy; // The macroscopic room energy
 
-        vec3 albedo = mix(color1, color2, mixVal1);
-        albedo = mix(albedo, color3, mixVal2);
+            #define MAX_STEPS 120
+            #define SURF_DIST 0.002
+            #define MAX_DIST 12.0
 
-        // Blinn-Phong Lighting Setup
-        vec3 lightDir = normalize(vec3(1.0, 1.0, 1.0));
-        float diffuse = max(dot(n, lightDir), 0.0);
+            mat2 rot(float a) {
+                float s = sin(a), c = cos(a);
+                return mat2(c, -s, s, c);
+            }
 
-        // High-gloss Specular highlight for a "touchable" glass-like surface
-        vec3 reflectDir = reflect(-lightDir, n);
-        float specular = pow(max(dot(viewDir, reflectDir), 0.0), 80.0);
+            // High-Threshold Audio Sampler
+            float getAudio(float freq) {
+                float val = texture(u_audioTex, vec2(freq, 0.5)).r;
+                // STRICT GATE: smoothstep ignores everything under 0.65 (background noise)
+                // and ramps up violently only for loud peaks.
+                return pow(smoothstep(0.65, 1.0, val), 2.0);
+            }
 
-        // Fresnel effect for rim lighting
-        float fresnel = pow(1.0 - max(dot(n, viewDir), 0.0), 2.5);
+            // --- THE MORPHING MANDELBULB ---
+            vec2 map(vec3 p) {
+                vec3 z = p;
+                float dr = 1.0;
+                float r = 0.0;
+                
+                float bassHit = getAudio(0.05);
+                
+                // THE MORPH: When quiet, it's a calm shape (power 8). 
+                // When the club is loud (u_energy is high), it shatters into an alien cavern (power goes to 14+)
+                float power = 8.0 + (u_energy * 12.0) + (bassHit * 2.0);
+                
+                float trap = 1.0;
 
-        // Combine lighting and colors
-        vec3 finalColor = albedo * (diffuse * 0.6 + 0.4) + vec3(specular * 1.2) + (fresnel * vec3(0.8, 0.9, 1.0));
+                for (int i = 0; i < 5; i++) {
+                    r = length(z);
+                    if (r > 2.0) break;
+                    
+                    float theta = acos(z.z / r);
+                    float phi = atan(z.y, z.x);
+                    
+                    dr = pow(r, power - 1.0) * power * dr + 1.0;
+                    
+                    float zr = pow(r, power);
+                    theta = theta * power;
+                    phi = phi * power;
+                    
+                    z = zr * vec3(sin(theta)*cos(phi), sin(phi)*sin(theta), cos(theta));
+                    z += p;
+                    
+                    trap = min(trap, length(z));
+                }
+                
+                return vec2(0.5 * log(r) * r / dr, trap);
+            }
 
-        // Smooth edge alpha drop-off to avoid jagged clipping on the transparent background
-        float edgeAlpha = smoothstep(0.0, 0.15, max(dot(n, viewDir), 0.0));
+            vec3 getNormal(vec3 p) {
+                float d = map(p).x;
+                vec2 e = vec2(0.001, 0.0);
+                return normalize(vec3(
+                    map(p + e.xyy).x - d,
+                    map(p + e.yxy).x - d,
+                    map(p + e.yyx).x - d
+                ));
+            }
 
-        gl_FragColor = vec4(finalColor, edgeAlpha);
-      }
-    `;
+            float calcAO(vec3 pos, vec3 nor) {
+                float occ = 0.0;
+                float sca = 1.0;
+                for(int i=0; i<5; i++) {
+                    float hr = 0.01 + 0.12*float(i)/4.0;
+                    vec3 aopos = nor * hr + pos;
+                    float dd = map(aopos).x;
+                    occ += -(dd-hr)*sca;
+                    sca *= 0.95;
+                }
+                return clamp(1.0 - 3.0*occ, 0.0, 1.0);
+            }
 
-    function setup() {
-      // Initialize WebGL canvas
-      createCanvas(windowWidth, windowHeight, WEBGL);
-      // Double the pixel density for ultra-high definition displays
-      pixelDensity(2); 
-      
-      // Compile the shader
-      orbShader = createShader(vertShader, fragShader);
-      noStroke();
-    }
+            void main() {
+                vec2 uv = (v_uv - 0.5) * 2.0;
+                uv.x *= u_resolution.x / u_resolution.y;
 
-    function draw() {
-      // Clear with full transparency so it "floats" on the HTML background
-      clear(0, 0, 0, 0); 
+                // Slow, heavy camera rotation
+                vec3 ro = vec3(0.0, 0.0, 2.7);
+                ro.xz *= rot(u_time * 0.1);
+                ro.yz *= rot(u_time * 0.05);
+                
+                // Camera shakes slightly only when energy is massive
+                ro.x += sin(u_time * 50.0) * u_energy * 0.02;
+                ro.y += cos(u_time * 40.0) * u_energy * 0.02;
 
-      // Activate shader and pass the time uniform
-      shader(orbShader);
-      orbShader.setUniform('uTime', millis() / 1000.0);
+                vec3 target = vec3(0.0);
+                vec3 z = normalize(target - ro);
+                vec3 x = normalize(cross(vec3(0.0, 1.0, 0.0), z));
+                vec3 y = cross(z, x);
+                vec3 rd = normalize(uv.x * x + uv.y * y + 1.2 * z);
 
-      // Rotate the orb slowly to show off the 3D lighting
-      rotateY(millis() / 3000.0);
-      rotateX(millis() / 4000.0);
+                float b = dot(ro, rd);
+                float c = dot(ro, ro) - 1.6 * 1.6;
+                if(b*b - c < 0.0) {
+                    fragColor = vec4(0.0);
+                    return;
+                }
 
-      // Draw a high-resolution sphere (radius, detailX, detailY)
-      let radius = min(width, height) * 0.3;
-      sphere(radius, 150, 150); 
-    }
+                float t = 0.0;
+                float trap = 0.0;
+                float steps = 0.0;
+                
+                for(int i = 0; i < MAX_STEPS; i++) {
+                    vec3 p = ro + rd * t;
+                    vec2 result = map(p);
+                    float d = result.x;
+                    
+                    if(d < SURF_DIST || t > MAX_DIST) {
+                        trap = result.y;
+                        break;
+                    }
+                    t += d;
+                    steps++;
+                }
 
-    function windowResized() {
-      resizeCanvas(windowWidth, windowHeight);
-    }
-  </script>
+                if(t > MAX_DIST) {
+                    fragColor = vec4(0.0);
+                    return;
+                }
+
+                vec3 p = ro + rd * t;
+                vec3 n = getNormal(p);
+                vec3 viewDir = normalize(ro - p);
+
+                vec3 lightPos = vec3(2.0 * sin(u_time), 3.0, 2.0 * cos(u_time));
+                vec3 lDir = normalize(lightPos - p);
+                
+                float diff = max(dot(n, lDir), 0.0);
+                float spec = pow(max(dot(viewDir, reflect(-lDir, n)), 0.0), 32.0);
+                float fresnel = pow(1.0 - max(dot(n, viewDir), 0.0), 4.0);
+                
+                float ao = calcAO(p, n);
+
+                // --- GATED AUDIO MATERIAL ---
+                float highFreqHit = getAudio(0.8);
+                
+                // When quiet, it's dark obsidian and deep navy.
+                // When loud, it heats up into gold, cyan, and magenta plasma.
+                vec3 colorDark = vec3(0.01, 0.02, 0.05);
+                vec3 colorMid = mix(vec3(0.0, 0.2, 0.6), vec3(0.8, 0.2, 0.5), u_energy * 2.0);
+                vec3 colorEnergy = mix(vec3(0.0, 0.8, 1.0), vec3(1.0, 0.8, 0.2), u_energy * 2.0);
+                
+                vec3 albedo = mix(colorDark, colorMid, clamp(trap * 2.0, 0.0, 1.0));
+                
+                // Massive ignition on high-hats/snares, but only if they pierce the noise gate
+                float ignition = smoothstep(0.2, 0.0, trap) * highFreqHit;
+
+                vec3 finalColor = albedo * (diff * ao + 0.1 * ao);
+                finalColor += spec * (1.0 + highFreqHit);
+                finalColor += fresnel * colorMid * ao;
+                finalColor += colorEnergy * ignition * 8.0 * (1.0 + u_energy); 
+
+                // Deep plasma glow in the crevices based on global volume
+                float glow = pow(steps / float(MAX_STEPS), 2.5);
+                finalColor += colorEnergy * glow * (u_energy * 5.0);
+
+                // ACES Tonemapping
+                finalColor = clamp((finalColor*(2.51*finalColor+0.03))/(finalColor*(2.43*finalColor+0.59)+0.14), 0.0, 1.0);
+                finalColor = pow(finalColor, vec3(1.0/2.2));
+
+                float edgeAlpha = smoothstep(0.0, 0.2, max(dot(n, viewDir), 0.0));
+
+                fragColor = vec4(finalColor, edgeAlpha);
+            }
+        `;
+
+        function compileShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error("Shader Error:", gl.getShaderInfoLog(shader));
+                return null;
+            }
+            return shader;
+        }
+
+        const program = gl.createProgram();
+        gl.attachShader(program, compileShader(gl, gl.VERTEX_SHADER, vsSource));
+        gl.attachShader(program, compileShader(gl, gl.FRAGMENT_SHADER, fsSource));
+        gl.linkProgram(program);
+        gl.useProgram(program);
+
+        const vertices = new Float32Array([-1,-1, 3,-1, -1,3]);
+        const vao = gl.createVertexArray();
+        gl.bindVertexArray(vao);
+        const vbo = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+        gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+        const posAttrib = gl.getAttribLocation(program, "a_position");
+        gl.enableVertexAttribArray(posAttrib);
+        gl.vertexAttribPointer(posAttrib, 2, gl.FLOAT, false, 0, 0);
+
+        const locRes = gl.getUniformLocation(program, "u_resolution");
+        const locTime = gl.getUniformLocation(program, "u_time");
+        const locAudio = gl.getUniformLocation(program, "u_audioTex");
+        const locEnergy = gl.getUniformLocation(program, "u_energy");
+
+        function render(time) {
+            const dpr = Math.min(window.devicePixelRatio || 1, 2.0); 
+            const w = window.innerWidth * dpr;
+            const h = window.innerHeight * dpr;
+            if (canvas.width !== w || canvas.height !== h) {
+                canvas.width = w; canvas.height = h;
+                gl.viewport(0, 0, w, h);
+            }
+
+            updateAudioEngine(gl);
+
+            gl.clearColor(0.0, 0.0, 0.0, 0.0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            gl.uniform2f(locRes, canvas.width, canvas.height);
+            gl.uniform1f(locTime, time * 0.001);
+            gl.uniform1f(locEnergy, globalSmoothedEnergy);
+            
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, audioTexture);
+            gl.uniform1i(locAudio, 0);
+
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+            requestAnimationFrame(render);
+        }
+
+        requestAnimationFrame(render);
+    </script>
 </body>
 </html>
