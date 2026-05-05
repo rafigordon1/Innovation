@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>High-Threshold Quantum Mandelbulb</title>
+    <title>Autonomous Evolving Quantum Mandelbulb (Fullscreen)</title>
     <style>
         body, html {
             margin: 0; padding: 0;
@@ -32,14 +32,14 @@
         }
         @keyframes pulse {
             0%, 100% { opacity: 0.5; }
-            50% { opacity: 1; text-shadow: 0 0 20px rgba(0, 255, 255, 0.8); }
+            50% { opacity: 1; text-shadow: 0 0 20px rgba(255, 255, 255, 0.8); }
         }
     </style>
 </head>
 <body>
     <div id="overlay">
-        <div class="pulse-text">Click to Ignite High-Threshold Engine</div>
-        <div class="sub-text">Requires very loud audio to morph</div>
+        <div class="pulse-text">Click to Ignite & Enter Fullscreen</div>
+        <div class="sub-text">Constantly evolving geometry & colour</div>
     </div>
     <canvas id="glcanvas"></canvas>
 
@@ -55,8 +55,7 @@
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                 analyser = audioCtx.createAnalyser();
                 analyser.fftSize = 512; 
-                // HIGH SMOOTHING: Kills the jitter. Makes movements fluid and heavy.
-                analyser.smoothingTimeConstant = 0.94; 
+                analyser.smoothingTimeConstant = 0.92; 
                 
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 const source = audioCtx.createMediaStreamSource(stream);
@@ -83,31 +82,37 @@
             if (!audioInitialized) return;
             analyser.getByteFrequencyData(dataArray);
             
-            // 1. Calculate Macroscopic Room Energy (with a hard noise gate)
             let currentEnergy = 0;
-            let gateThreshold = 160; // Ignore all noise below this raw value (approx 65% volume)
+            let gateThreshold = 140; 
             let activeBands = 0;
 
             for(let i = 0; i < dataArray.length; i++) {
                 if(dataArray[i] > gateThreshold) {
-                    // Exponentially scale loud bands
                     currentEnergy += Math.pow((dataArray[i] - gateThreshold) / (255 - gateThreshold), 2.0);
                     activeBands++;
                 }
             }
             
-            // Normalize energy
-            currentEnergy = activeBands > 0 ? (currentEnergy / dataArray.length) * 10.0 : 0.0;
-            
-            // Smooth the global energy so the fractal morphs heavily but gracefully
-            globalSmoothedEnergy += (currentEnergy - globalSmoothedEnergy) * 0.02;
+            currentEnergy = activeBands > 0 ? (currentEnergy / dataArray.length) * 12.0 : 0.0;
+            globalSmoothedEnergy += (currentEnergy - globalSmoothedEnergy) * 0.025;
 
-            // 2. Update the WebGL texture for specific frequency sampling
             gl.bindTexture(gl.TEXTURE_2D, audioTexture);
             gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 256, 1, gl.LUMINANCE, gl.UNSIGNED_BYTE, dataArray);
         }
 
+        // --- FULLSCREEN & IGNITION HANDLER ---
         document.getElementById('overlay').addEventListener('click', async function() {
+            // Trigger browser Fullscreen API
+            let elem = document.documentElement;
+            if (elem.requestFullscreen) {
+                elem.requestFullscreen();
+            } else if (elem.webkitRequestFullscreen) { /* Safari */
+                elem.webkitRequestFullscreen();
+            } else if (elem.msRequestFullscreen) { /* IE11 */
+                elem.msRequestFullscreen();
+            }
+
+            // Ignite Audio
             await initAudio(gl);
             this.style.opacity = '0';
             setTimeout(() => this.style.display = 'none', 1000);
@@ -135,7 +140,7 @@
             uniform vec2 u_resolution;
             uniform float u_time;
             uniform sampler2D u_audioTex;
-            uniform float u_energy; // The macroscopic room energy
+            uniform float u_energy; 
 
             #define MAX_STEPS 120
             #define SURF_DIST 0.002
@@ -146,25 +151,35 @@
                 return mat2(c, -s, s, c);
             }
 
-            // High-Threshold Audio Sampler
+            // Audio Sampler
             float getAudio(float freq) {
                 float val = texture(u_audioTex, vec2(freq, 0.5)).r;
-                // STRICT GATE: smoothstep ignores everything under 0.65 (background noise)
-                // and ramps up violently only for loud peaks.
-                return pow(smoothstep(0.65, 1.0, val), 2.0);
+                return pow(smoothstep(0.5, 1.0, val), 2.0);
             }
 
-            // --- THE MORPHING MANDELBULB ---
+            // Procedural Shifting Color Palette (Cosine based)
+            vec3 palette(float t) {
+                vec3 a = vec3(0.5, 0.5, 0.5);
+                vec3 b = vec3(0.5, 0.5, 0.5);
+                vec3 c = vec3(1.0, 1.0, 1.0);
+                vec3 d = vec3(0.00, 0.33, 0.67); 
+                return a + b * cos(6.28318 * (c * t + d));
+            }
+
+            // --- THE AUTONOMOUSLY EVOLVING MANDELBULB ---
             vec2 map(vec3 p) {
                 vec3 z = p;
+                
+                z.xy *= rot(sin(u_time * 0.05) * 0.3);
+                z.yz *= rot(cos(u_time * 0.04) * 0.3);
+
                 float dr = 1.0;
                 float r = 0.0;
                 
                 float bassHit = getAudio(0.05);
                 
-                // THE MORPH: When quiet, it's a calm shape (power 8). 
-                // When the club is loud (u_energy is high), it shatters into an alien cavern (power goes to 14+)
-                float power = 8.0 + (u_energy * 12.0) + (bassHit * 2.0);
+                float basePower = 8.0 + sin(u_time * 0.15) * 3.0; 
+                float power = basePower + (u_energy * 10.0) + (bassHit * 3.0);
                 
                 float trap = 1.0;
 
@@ -174,6 +189,8 @@
                     
                     float theta = acos(z.z / r);
                     float phi = atan(z.y, z.x);
+                    
+                    phi += sin(u_time * 0.1 + float(i)) * 0.1;
                     
                     dr = pow(r, power - 1.0) * power * dr + 1.0;
                     
@@ -217,14 +234,12 @@
                 vec2 uv = (v_uv - 0.5) * 2.0;
                 uv.x *= u_resolution.x / u_resolution.y;
 
-                // Slow, heavy camera rotation
                 vec3 ro = vec3(0.0, 0.0, 2.7);
-                ro.xz *= rot(u_time * 0.1);
-                ro.yz *= rot(u_time * 0.05);
+                ro.xz *= rot(u_time * 0.08);
+                ro.yz *= rot(sin(u_time * 0.06) * 0.5);
                 
-                // Camera shakes slightly only when energy is massive
-                ro.x += sin(u_time * 50.0) * u_energy * 0.02;
-                ro.y += cos(u_time * 40.0) * u_energy * 0.02;
+                ro.x += sin(u_time * 20.0) * u_energy * 0.015;
+                ro.y += cos(u_time * 15.0) * u_energy * 0.015;
 
                 vec3 target = vec3(0.0);
                 vec3 z = normalize(target - ro);
@@ -265,7 +280,7 @@
                 vec3 n = getNormal(p);
                 vec3 viewDir = normalize(ro - p);
 
-                vec3 lightPos = vec3(2.0 * sin(u_time), 3.0, 2.0 * cos(u_time));
+                vec3 lightPos = vec3(3.0 * sin(u_time*0.5), 3.0, 3.0 * cos(u_time*0.5));
                 vec3 lDir = normalize(lightPos - p);
                 
                 float diff = max(dot(n, lDir), 0.0);
@@ -274,30 +289,27 @@
                 
                 float ao = calcAO(p, n);
 
-                // --- GATED AUDIO MATERIAL ---
                 float highFreqHit = getAudio(0.8);
                 
-                // When quiet, it's dark obsidian and deep navy.
-                // When loud, it heats up into gold, cyan, and magenta plasma.
-                vec3 colorDark = vec3(0.01, 0.02, 0.05);
-                vec3 colorMid = mix(vec3(0.0, 0.2, 0.6), vec3(0.8, 0.2, 0.5), u_energy * 2.0);
-                vec3 colorEnergy = mix(vec3(0.0, 0.8, 1.0), vec3(1.0, 0.8, 0.2), u_energy * 2.0);
+                float colorDrift = u_time * 0.05 + (u_energy * 0.5);
                 
-                vec3 albedo = mix(colorDark, colorMid, clamp(trap * 2.0, 0.0, 1.0));
+                vec3 colorDark = palette(colorDrift) * 0.15; 
+                vec3 colorMid = palette(colorDrift + 0.3) * (0.4 + u_energy * 1.5); 
+                vec3 colorEnergy = palette(colorDrift + 0.6) * (1.0 + u_energy * 2.0); 
                 
-                // Massive ignition on high-hats/snares, but only if they pierce the noise gate
+                vec3 albedo = mix(colorDark, colorMid, clamp(trap * 2.5, 0.0, 1.0));
+                
                 float ignition = smoothstep(0.2, 0.0, trap) * highFreqHit;
 
                 vec3 finalColor = albedo * (diff * ao + 0.1 * ao);
-                finalColor += spec * (1.0 + highFreqHit);
+                
+                finalColor += spec * colorEnergy * 0.5 * (1.0 + highFreqHit);
                 finalColor += fresnel * colorMid * ao;
                 finalColor += colorEnergy * ignition * 8.0 * (1.0 + u_energy); 
 
-                // Deep plasma glow in the crevices based on global volume
                 float glow = pow(steps / float(MAX_STEPS), 2.5);
-                finalColor += colorEnergy * glow * (u_energy * 5.0);
+                finalColor += colorEnergy * glow * (2.0 + u_energy * 5.0);
 
-                // ACES Tonemapping
                 finalColor = clamp((finalColor*(2.51*finalColor+0.03))/(finalColor*(2.43*finalColor+0.59)+0.14), 0.0, 1.0);
                 finalColor = pow(finalColor, vec3(1.0/2.2));
 
