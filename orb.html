@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Quantum Fractal Volumetrics (Raw WebGL2)</title>
+    <title>Audio-Reactive Quantum Glass</title>
     <style>
         body, html {
             margin: 0;
@@ -11,8 +11,8 @@
             width: 100vw;
             height: 100vh;
             overflow: hidden;
-            /* Pure transparent background to prove floating effect */
             background-color: transparent; 
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
         }
         canvas {
             display: block;
@@ -21,24 +21,91 @@
             position: absolute;
             top: 0;
             left: 0;
+            z-index: 1;
+        }
+        #overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.85);
+            color: #fff;
+            z-index: 10;
+            cursor: pointer;
+            transition: opacity 1s ease-in-out;
+            backdrop-filter: blur(10px);
+        }
+        .pulse-text {
+            font-size: 1.2rem;
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 0.5; }
+            50% { opacity: 1; text-shadow: 0 0 20px rgba(255,255,255,0.5); }
         }
     </style>
 </head>
 <body>
-    <!-- The canvas will be rendered transparently over the body -->
+    <div id="overlay">
+        <div class="pulse-text">Click to Ignite Audio Engine</div>
+    </div>
     <canvas id="glcanvas"></canvas>
 
     <script>
-        const canvas = document.getElementById('glcanvas');
-        // Initialize WebGL 2 for advanced shader features
-        const gl = canvas.getContext('webgl2', { alpha: true, antialias: false, premultipliedAlpha: false });
+        // --- AUDIO ENGINE ---
+        let audioCtx, analyser, dataArray;
+        let audioData = { bass: 0, mid: 0, treb: 0 };
+        let audioInitialized = false;
 
-        if (!gl) {
-            alert('WebGL 2 is not available on your browser/device.');
+        async function initAudio() {
+            try {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 256;
+                analyser.smoothingTimeConstant = 0.8; 
+                
+                // Requests microphone. (Can be routed to main output via Loopback software for performances)
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const source = audioCtx.createMediaStreamSource(stream);
+                source.connect(analyser);
+                
+                dataArray = new Uint8Array(analyser.frequencyBinCount);
+                audioInitialized = true;
+            } catch (err) {
+                console.error("Audio initialization failed:", err);
+                alert("Microphone access is required for the audio-reactive simulation.");
+            }
         }
 
-        // --- VERTEX SHADER ---
-        // A highly optimized trick: Drawing a single triangle that covers the entire screen
+        function updateAudioData() {
+            if (!audioInitialized) return;
+            analyser.getByteFrequencyData(dataArray);
+            
+            // Isolate frequency bands
+            let b = 0, m = 0, t = 0;
+            for(let i = 0; i < 10; i++) b += dataArray[i];
+            for(let i = 10; i < 50; i++) m += dataArray[i];
+            for(let i = 50; i < 120; i++) t += dataArray[i];
+            
+            // Normalize and smooth values
+            audioData.bass = (b / 10) / 255.0;
+            audioData.mid = (m / 40) / 255.0;
+            audioData.treb = (t / 70) / 255.0;
+        }
+
+        document.getElementById('overlay').addEventListener('click', async function() {
+            await initAudio();
+            this.style.opacity = '0';
+            setTimeout(() => this.style.display = 'none', 1000);
+        });
+
+        // --- WEBGL ENGINE ---
+        const canvas = document.getElementById('glcanvas');
+        const gl = canvas.getContext('webgl2', { alpha: true, antialias: true, premultipliedAlpha: false });
+
         const vsSource = `#version 300 es
             in vec2 a_position;
             out vec2 v_uv;
@@ -48,230 +115,184 @@
             }
         `;
 
-        // --- FRAGMENT SHADER ---
         const fsSource = `#version 300 es
             precision highp float;
-            
             in vec2 v_uv;
             out vec4 fragColor;
 
             uniform vec2 u_resolution;
             uniform float u_time;
-            uniform vec2 u_mouse;
+            
+            // Audio Uniforms
+            uniform float u_bass;
+            uniform float u_mid;
+            uniform float u_treb;
 
-            // Mathematical constants
-            #define PI 3.14159265359
-
-            // 2D Rotation
             mat2 rot(float a) {
                 float s = sin(a), c = cos(a);
                 return mat2(c, -s, s, c);
             }
 
-            // Cinematic ACES Tone Mapping
-            vec3 ACESFilm(vec3 x) {
-                float a = 2.51;
-                float b = 0.03;
-                float c = 2.43;
-                float d = 0.59;
-                float e = 0.14;
-                return clamp((x*(a*x+b))/(x*(c*x+d)+e), 0.0, 1.0);
+            // High-definition cellular noise for crystalline structure
+            vec3 cellular(vec3 p) {
+                vec3 pi = floor(p);
+                vec3 pf = fract(p);
+                pf = pf * pf * (3.0 - 2.0 * pf);
+                float d1 = 1e10, d2 = 1e10;
+                for (int z=-1; z<=1; z++) {
+                    for (int y=-1; y<=1; y++) {
+                        for (int x=-1; x<=1; x++) {
+                            vec3 g = vec3(float(x), float(y), float(z));
+                            vec3 o = fract(sin(pi + g + vec3(12.3, 34.5, 56.7)) * 43758.545);
+                            vec3 r = g - pf + o;
+                            float d = dot(r, r);
+                            if (d < d1) { d2 = d1; d1 = d; } 
+                            else if (d < d2) { d2 = d; }
+                        }
+                    }
+                }
+                return vec3(sqrt(d1), sqrt(d2), 0.0);
             }
 
-            // High-frequency hash for dithering (removes banding)
-            float hash12(vec2 p) {
-                vec3 p3  = fract(vec3(p.xyx) * .1031);
-                p3 += dot(p3, p3.yzx + 33.33);
-                return fract((p3.x + p3.y) * p3.z);
-            }
-
-            // --- INTERNAL KIFS FRACTAL ---
-            // Kaleidoscopic Iterated Function System
+            // Audio-Driven Fractured Volume
             float mapVol(vec3 p) {
                 vec3 p0 = p;
                 
-                // Slowly evolve the fractal over time
-                float t = u_time * 0.2;
-                p.xz *= rot(t);
-                p.xy *= rot(t * 0.7);
+                // Rotations driven by time AND mid-frequencies
+                p.xy *= rot(u_time * 0.15 + u_mid * 1.5);
+                p.xz *= rot(u_time * 0.1 - u_bass * 0.5);
                 
                 float scale = 1.0;
-                // Fold space repeatedly to create infinite internal complexity
-                for(int i = 0; i < 5; i++) {
-                    p = abs(p) - 0.3;
-                    p.xy *= rot(0.5);
+                // KIFS folding reacting to treble (creates sharp, shattering geometry on hi-hats/snares)
+                for(int i = 0; i < 4; i++) {
+                    p = abs(p) - (0.2 + u_treb * 0.15);
+                    p.xy *= rot(0.5 + u_bass * 0.5);
                     p.yz *= rot(0.3);
-                    
-                    // Non-linear scaling
-                    float s = max(1.2 / dot(p, p), 1.0);
-                    p *= s;
-                    scale *= s;
+                    p *= 1.4;
+                    scale *= 1.4;
                 }
                 
-                // Combine folded space with a gyroid to create organic "tendrils"
-                float d = length(p) / scale;
-                float gyroid = abs(dot(sin(p0 * 4.0), cos(p0.zxy * 4.0))) * 0.1;
+                // Crystalline cellular structure driven by base
+                vec3 cell = cellular(p * 2.0 - u_time);
+                float crystal = (cell.y - cell.x) * (0.5 + u_bass * 0.5);
                 
-                return d + gyroid;
-            }
-
-            // Phase Function: Determines how light scatters through gas
-            float phaseHG(float cosTheta, float g) {
-                float g2 = g * g;
-                return (1.0 - g2) / (4.0 * PI * pow(1.0 + g2 - 2.0 * g * cosTheta, 1.5));
+                float baseStruct = length(p) / scale;
+                return max(baseStruct, crystal) - 0.05;
             }
 
             void main() {
-                // Centered, responsive UV coordinates mapping
                 vec2 uv = (v_uv - 0.5) * 2.0;
                 uv.x *= u_resolution.x / u_resolution.y;
 
-                // Mouse interactivity
-                vec2 m = u_mouse * 2.0 - 1.0;
-                m.x *= u_resolution.x / u_resolution.y;
-
-                // Interactive Camera Setup
-                vec3 ro = vec3(sin(m.x*2.0)*3.0, m.y*2.5, cos(m.x*2.0)*3.0);
+                // Non-interactive, chaotic celestial camera orbit
+                float camTime = u_time * 0.2;
+                vec3 ro = vec3(sin(camTime)*2.0, cos(camTime*0.7)*1.5, cos(camTime)*2.0 + 2.0);
                 vec3 target = vec3(0.0);
                 vec3 cz = normalize(target - ro);
                 vec3 cx = normalize(cross(vec3(0.0, 1.0, 0.0), cz));
                 vec3 cy = cross(cz, cx);
-                vec3 rd = normalize(uv.x * cx + uv.y * cy + 1.8 * cz); // 1.8 = FOV
+                vec3 rd = normalize(uv.x * cx + uv.y * cy + 1.5 * cz);
 
-                // Mathematical intersection with a perfect sphere
-                float radius = 1.6;
+                // Pure geometric sphere intersection for the outer shell
+                float radius = 1.3 + (u_bass * 0.05); // Orb slightly expands on bass hits
                 float b = dot(ro, rd);
                 float c = dot(ro, ro) - radius * radius;
                 float h = b*b - c;
 
-                // If ray misses the orb completely, render pure transparent background
                 if(h < 0.0) {
-                    fragColor = vec4(0.0);
+                    fragColor = vec4(0.0); // Perfect transparent floating background
                     return;
                 }
 
-                // --- BOUNDARY / OPTICS CALCULATIONS ---
                 h = sqrt(h);
-                float t1 = -b - h; // Ray entry point
-                float t2 = -b + h; // Ray exit point
+                float t1 = -b - h; 
+                float t2 = -b + h; 
 
-                vec3 pIn = ro + rd * t1; // Hit position on shell
+                vec3 pIn = ro + rd * t1; 
                 vec3 normalIn = normalize(pIn);
                 vec3 viewDir = -rd;
 
-                // Dynamic Light Source
-                vec3 lightPos = vec3(sin(u_time)*3.0, 2.0, cos(u_time)*3.0);
+                vec3 lightPos = vec3(sin(u_time)*3.0, 3.0, cos(u_time)*3.0);
                 vec3 lightDir = normalize(lightPos - pIn);
 
-                // --- CHROMATIC DISPERSION ---
-                // Bend the light into the sphere. Different colors bend differently.
-                vec3 refractR = refract(rd, normalIn, 1.0 / 1.30);
-                vec3 refractG = refract(rd, normalIn, 1.0 / 1.35);
-                vec3 refractB = refract(rd, normalIn, 1.0 / 1.40);
-                
-                // We will use the green channel as the primary ray for marching
-                vec3 rayDirIn = refractG; 
+                // Chromatic Refraction into dark glass
+                vec3 rayDirIn = refract(rd, normalIn, 1.0 / 1.40); 
 
-                // Shell Surface Optics
+                // Defined Outer Shell Specs
                 vec3 reflection = reflect(rd, normalIn);
-                float specular = pow(max(dot(reflection, lightDir), 0.0), 200.0) * 2.5;
+                float specPower = 200.0 - (u_treb * 100.0); // Specular flares out on high frequencies
+                float specular = pow(max(dot(reflection, lightDir), 0.0), specPower) * 3.0;
                 float fresnel = pow(1.0 - max(dot(normalIn, viewDir), 0.0), 4.0);
 
-                // --- VOLUMETRIC PATH MARCHING ---
-                int steps = 60; // Ultra high fidelity
+                // Volumetric Path Marching inside the shell
+                int steps = 60; 
                 float stepSize = (t2 - t1) / float(steps);
                 
                 vec3 volumeColor = vec3(0.0);
-                float densityAcc = 0.0;
                 float transmittance = 1.0;
 
-                // Base colors for the quantum gas
-                vec3 color1 = vec3(0.0, 0.8, 1.0); // Cyan
-                vec3 color2 = vec3(0.9, 0.0, 0.8); // Magenta
-
-                // Scattering phase based on light direction inside the volume
-                float cosTheta = dot(rayDirIn, lightDir);
-                float phase = phaseHG(cosTheta, 0.6); // Forward scattering
-
-                // Add spatial dithering to the starting point to eliminate volume banding
-                float dither = hash12(uv + u_time) * stepSize;
+                // Color palette reacting to audio energy
+                vec3 cDeep = vec3(0.0, 0.1, 0.4); 
+                vec3 cEnergy = vec3(0.1, 0.6 + u_mid * 0.4, 1.0); 
+                vec3 cFlash = vec3(1.0, 0.5 + u_treb, 0.9);
 
                 for(int i = 0; i < 60; i++) {
-                    // March through the internal space
-                    float t = float(i) * stepSize + dither;
+                    float t = float(i) * stepSize;
                     vec3 p = pIn + rayDirIn * t;
                     
-                    // Evaluate the complex fractal field
                     float dField = mapVol(p);
                     
-                    // Create sharp, distinct energy filaments
-                    float density = smoothstep(0.15, 0.0, dField) * 1.5;
+                    // High-definition crystal boundaries
+                    float density = smoothstep(0.03, 0.0, dField) * (5.0 + u_bass * 10.0);
                     
                     if(density > 0.0) {
-                        // Depth-based color shifting
-                        vec3 emitColor = mix(color1, color2, sin(length(p)*2.0 - u_time)*0.5+0.5);
+                        // Depth and energy based color mapping
+                        vec3 emitColor = mix(cDeep, cEnergy, length(p)*0.5);
+                        emitColor = mix(emitColor, cFlash, u_treb * 0.8 * smoothstep(0.0, 0.1, dField));
                         
-                        // How much light is hitting this specific particle
-                        float lightGlow = (0.5 + 0.5 * phase);
+                        // Internal light flashes with the beat
+                        float lightGlow = 1.0 + (u_bass * 3.0);
                         
-                        // Add to overall volume
-                        volumeColor += emitColor * density * transmittance * lightGlow * stepSize * 15.0;
-                        
-                        // Beer's Law attenuation
-                        transmittance *= exp(-density * stepSize * 6.0);
+                        volumeColor += emitColor * density * transmittance * lightGlow * stepSize;
+                        transmittance *= exp(-density * stepSize * 5.0);
                     }
-                    
-                    // Optimization: stop tracking if the ray hits thick gas and goes dark
                     if(transmittance < 0.01) break; 
                 }
 
-                // --- COMPOSITING ---
-                // Outer shell reflection + glowing rim
-                vec3 shellColor = vec3(specular) + fresnel * vec3(0.3, 0.6, 1.0);
-                
-                // Combine volume and shell
+                // Outer shell composition
+                vec3 shellColor = vec3(specular) + fresnel * vec3(0.2, 0.5, 1.0) * (1.0 + u_mid);
                 vec3 finalColor = volumeColor + shellColor;
 
-                // Tonemapping and Gamma
-                finalColor = ACESFilm(finalColor);
+                // Filmic Tone Mapping
+                float A = 2.51, B = 0.03, C = 2.43, D = 0.59, E = 0.14;
+                finalColor = clamp((finalColor*(A*finalColor+B))/(finalColor*(C*finalColor+D)+E), 0.0, 1.0);
                 finalColor = pow(finalColor, vec3(1.0/2.2));
 
-                // Smooth the external boundary edge to prevent jagged aliasing against transparent background
+                // Smooth edge against transparency
                 float edgeAlpha = smoothstep(0.0, 0.1, max(dot(normalIn, viewDir), 0.0));
 
                 fragColor = vec4(finalColor, edgeAlpha);
             }
         `;
 
-        // --- WEBGL COMPILATION ---
         function compileShader(gl, type, source) {
             const shader = gl.createShader(type);
             gl.shaderSource(shader, source);
             gl.compileShader(shader);
             if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
                 console.error("Shader Compile Error:", gl.getShaderInfoLog(shader));
-                gl.deleteShader(shader);
                 return null;
             }
             return shader;
         }
 
-        const vertexShader = compileShader(gl, gl.VERTEX_SHADER, vsSource);
-        const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, fsSource);
-
         const program = gl.createProgram();
-        gl.attachShader(program, vertexShader);
-        gl.attachShader(program, fragmentShader);
+        gl.attachShader(program, compileShader(gl, gl.VERTEX_SHADER, vsSource));
+        gl.attachShader(program, compileShader(gl, gl.FRAGMENT_SHADER, fsSource));
         gl.linkProgram(program);
         gl.useProgram(program);
 
-        // --- FULL SCREEN GEOMETRY ---
-        // A single large triangle that covers the screen [-1 to 3]
-        const vertices = new Float32Array([
-            -1.0, -1.0,
-             3.0, -1.0,
-            -1.0,  3.0
-        ]);
+        const vertices = new Float32Array([-1, -1, 3, -1, -1, 3]);
         const vao = gl.createVertexArray();
         gl.bindVertexArray(vao);
         const vbo = gl.createBuffer();
@@ -281,39 +302,31 @@
         gl.enableVertexAttribArray(posAttrib);
         gl.vertexAttribPointer(posAttrib, 2, gl.FLOAT, false, 0, 0);
 
-        // --- UNIFORMS & RENDER LOOP ---
-        const uResLocation = gl.getUniformLocation(program, "u_resolution");
-        const uTimeLocation = gl.getUniformLocation(program, "u_time");
-        const uMouseLocation = gl.getUniformLocation(program, "u_mouse");
+        const locRes = gl.getUniformLocation(program, "u_resolution");
+        const locTime = gl.getUniformLocation(program, "u_time");
+        const locBass = gl.getUniformLocation(program, "u_bass");
+        const locMid = gl.getUniformLocation(program, "u_mid");
+        const locTreb = gl.getUniformLocation(program, "u_treb");
 
-        let mouseX = 0.5, mouseY = 0.5;
-        window.addEventListener('mousemove', (e) => {
-            mouseX = e.clientX / window.innerWidth;
-            mouseY = e.clientY / window.innerHeight;
-        });
-
-        function resize() {
-            // Dynamic resolution matching with hard cap to prevent overheating on ultra-high dpr screens
+        function render(time) {
             const dpr = Math.min(window.devicePixelRatio || 1, 2.0); 
             const w = window.innerWidth * dpr;
             const h = window.innerHeight * dpr;
             if (canvas.width !== w || canvas.height !== h) {
-                canvas.width = w;
-                canvas.height = h;
+                canvas.width = w; canvas.height = h;
                 gl.viewport(0, 0, w, h);
             }
-        }
 
-        function render(time) {
-            resize();
-            
-            // Clear to perfect transparency
+            updateAudioData();
+
             gl.clearColor(0.0, 0.0, 0.0, 0.0);
             gl.clear(gl.COLOR_BUFFER_BIT);
 
-            gl.uniform2f(uResLocation, canvas.width, canvas.height);
-            gl.uniform1f(uTimeLocation, time * 0.001);
-            gl.uniform2f(uMouseLocation, mouseX, mouseY);
+            gl.uniform2f(locRes, canvas.width, canvas.height);
+            gl.uniform1f(locTime, time * 0.001);
+            gl.uniform1f(locBass, audioData.bass);
+            gl.uniform1f(locMid, audioData.mid);
+            gl.uniform1f(locTreb, audioData.treb);
 
             gl.drawArrays(gl.TRIANGLES, 0, 3);
             requestAnimationFrame(render);
