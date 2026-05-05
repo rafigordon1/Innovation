@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Ultra HD Transparent WebGL Orb</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.js"></script>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      /* The body background is transparent to prove the floating effect */
+      background-color: transparent;
+    }
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <script>
+    let orbShader;
+
+    // Vertex Shader: Handles 3D geometry and passes data to the fragment shader
+    const vertShader = `
+      attribute vec3 aPosition;
+      attribute vec2 aTexCoord;
+      attribute vec3 aNormal;
+
+      uniform mat4 uProjectionMatrix;
+      uniform mat4 uModelViewMatrix;
+
+      varying vec2 vTexCoord;
+      varying vec3 vNormal;
+      varying vec3 vPosition;
+
+      void main() {
+        vTexCoord = aTexCoord;
+        // Transform normal into view space
+        vNormal = normalize((uModelViewMatrix * vec4(aNormal, 0.0)).xyz);
+        
+        vec4 positionVec4 = vec4(aPosition, 1.0);
+        vPosition = positionVec4.xyz;
+        
+        gl_Position = uProjectionMatrix * uModelViewMatrix * positionVec4;
+      }
+    `;
+
+    // Fragment Shader: Handles the fluid iridescence, lighting, and transparency
+    const fragShader = `
+      precision highp float;
+
+      varying vec2 vTexCoord;
+      varying vec3 vNormal;
+      varying vec3 vPosition;
+
+      uniform float uTime;
+
+      void main() {
+        vec3 n = normalize(vNormal);
+        vec3 viewDir = vec3(0.0, 0.0, 1.0);
+
+        // Volumetric noise simulation based on position and time
+        float noise = sin(vPosition.x * 0.015 + uTime * 1.2) * 
+                      sin(vPosition.y * 0.015 + uTime * 0.8) * 
+                      sin(vPosition.z * 0.015 - uTime * 1.5);
+
+        // Ethereal/Fluid color palette
+        vec3 color1 = vec3(0.1, 0.5, 1.0); // Deep azure
+        vec3 color2 = vec3(0.9, 0.2, 0.7); // Vibrant magenta
+        vec3 color3 = vec3(0.0, 0.9, 0.7); // Luminous cyan
+
+        // Smooth organic mixing
+        float mixVal1 = smoothstep(-1.0, 1.0, sin(vPosition.y * 0.02 + uTime * 2.0 + noise * 8.0));
+        float mixVal2 = smoothstep(-1.0, 1.0, cos(vPosition.x * 0.02 - uTime * 1.5 + noise * 10.0));
+
+        vec3 albedo = mix(color1, color2, mixVal1);
+        albedo = mix(albedo, color3, mixVal2);
+
+        // Blinn-Phong Lighting Setup
+        vec3 lightDir = normalize(vec3(1.0, 1.0, 1.0));
+        float diffuse = max(dot(n, lightDir), 0.0);
+
+        // High-gloss Specular highlight for a "touchable" glass-like surface
+        vec3 reflectDir = reflect(-lightDir, n);
+        float specular = pow(max(dot(viewDir, reflectDir), 0.0), 80.0);
+
+        // Fresnel effect for rim lighting
+        float fresnel = pow(1.0 - max(dot(n, viewDir), 0.0), 2.5);
+
+        // Combine lighting and colors
+        vec3 finalColor = albedo * (diffuse * 0.6 + 0.4) + vec3(specular * 1.2) + (fresnel * vec3(0.8, 0.9, 1.0));
+
+        // Smooth edge alpha drop-off to avoid jagged clipping on the transparent background
+        float edgeAlpha = smoothstep(0.0, 0.15, max(dot(n, viewDir), 0.0));
+
+        gl_FragColor = vec4(finalColor, edgeAlpha);
+      }
+    `;
+
+    function setup() {
+      // Initialize WebGL canvas
+      createCanvas(windowWidth, windowHeight, WEBGL);
+      // Double the pixel density for ultra-high definition displays
+      pixelDensity(2); 
+      
+      // Compile the shader
+      orbShader = createShader(vertShader, fragShader);
+      noStroke();
+    }
+
+    function draw() {
+      // Clear with full transparency so it "floats" on the HTML background
+      clear(0, 0, 0, 0); 
+
+      // Activate shader and pass the time uniform
+      shader(orbShader);
+      orbShader.setUniform('uTime', millis() / 1000.0);
+
+      // Rotate the orb slowly to show off the 3D lighting
+      rotateY(millis() / 3000.0);
+      rotateX(millis() / 4000.0);
+
+      // Draw a high-resolution sphere (radius, detailX, detailY)
+      let radius = min(width, height) * 0.3;
+      sphere(radius, 150, 150); 
+    }
+
+    function windowResized() {
+      resizeCanvas(windowWidth, windowHeight);
+    }
+  </script>
+</body>
+</html>
