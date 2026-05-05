@@ -1,203 +1,325 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Quantum Volumetric Glass Orb</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.js"></script>
-  <style>
-    body {
-      margin: 0;
-      padding: 0;
-      overflow: hidden;
-      /* Transparent background for perfect floating projection */
-      background-color: transparent; 
-    }
-    canvas {
-      display: block;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quantum Fractal Volumetrics (Raw WebGL2)</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            /* Pure transparent background to prove floating effect */
+            background-color: transparent; 
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+    </style>
 </head>
 <body>
-  <script>
-    let quantumShader;
+    <!-- The canvas will be rendered transparently over the body -->
+    <canvas id="glcanvas"></canvas>
 
-    const vertShader = `
-      attribute vec3 aPosition;
-      varying vec2 vUv;
-      void main() {
-        vUv = aPosition.xy * 0.5 + 0.5;
-        vUv.y = 1.0 - vUv.y; 
-        gl_Position = vec4(aPosition, 1.0);
-      }
-    `;
+    <script>
+        const canvas = document.getElementById('glcanvas');
+        // Initialize WebGL 2 for advanced shader features
+        const gl = canvas.getContext('webgl2', { alpha: true, antialias: false, premultipliedAlpha: false });
 
-    // The Ultimate Volumetric Fragment Shader
-    const fragShader = `
-      precision highp float;
+        if (!gl) {
+            alert('WebGL 2 is not available on your browser/device.');
+        }
 
-      varying vec2 vUv;
-      uniform vec2 u_resolution;
-      uniform float u_time;
-      uniform vec2 u_mouse;
+        // --- VERTEX SHADER ---
+        // A highly optimized trick: Drawing a single triangle that covers the entire screen
+        const vsSource = `#version 300 es
+            in vec2 a_position;
+            out vec2 v_uv;
+            void main() {
+                v_uv = a_position * 0.5 + 0.5;
+                gl_Position = vec4(a_position, 0.0, 1.0);
+            }
+        `;
 
-      // 2D Rotation
-      mat2 rot(float a) {
-          float s = sin(a), c = cos(a);
-          return mat2(c, -s, s, c);
-      }
+        // --- FRAGMENT SHADER ---
+        const fsSource = `#version 300 es
+            precision highp float;
+            
+            in vec2 v_uv;
+            out vec4 fragColor;
 
-      // Cosine Palette for quantum plasma colors
-      vec3 palette( in float t ) {
-          vec3 a = vec3(0.5, 0.5, 0.5);
-          vec3 b = vec3(0.5, 0.5, 0.5);
-          vec3 c = vec3(1.0, 1.0, 1.0);
-          vec3 d = vec3(0.263, 0.416, 0.557);
-          return a + b * cos( 6.28318 * (c * t + d) );
-      }
+            uniform vec2 u_resolution;
+            uniform float u_time;
+            uniform vec2 u_mouse;
 
-      // ACES Filmic Tone Mapping for cinematic color grading
-      vec3 ACESFilm(vec3 x) {
-          float a = 2.51;
-          float b = 0.03;
-          float c = 2.43;
-          float d = 0.59;
-          float e = 0.14;
-          return clamp((x*(a*x+b))/(x*(c*x+d)+e), 0.0, 1.0);
-      }
+            // Mathematical constants
+            #define PI 3.14159265359
 
-      void main() {
-          vec2 uv = (vUv - 0.5) * 2.0;
-          uv.x *= u_resolution.x / u_resolution.y;
+            // 2D Rotation
+            mat2 rot(float a) {
+                float s = sin(a), c = cos(a);
+                return mat2(c, -s, s, c);
+            }
 
-          vec2 m = u_mouse * 2.0 - 1.0;
-          m.x *= u_resolution.x / u_resolution.y;
+            // Cinematic ACES Tone Mapping
+            vec3 ACESFilm(vec3 x) {
+                float a = 2.51;
+                float b = 0.03;
+                float c = 2.43;
+                float d = 0.59;
+                float e = 0.14;
+                return clamp((x*(a*x+b))/(x*(c*x+d)+e), 0.0, 1.0);
+            }
 
-          // Camera setup
-          vec3 ro = vec3(sin(m.x)*3.0, m.y * 2.0, cos(m.x)*3.0); 
-          vec3 target = vec3(0.0);
-          vec3 z = normalize(target - ro);
-          vec3 x = normalize(cross(vec3(0.0, 1.0, 0.0), z));
-          vec3 y = cross(z, x);
-          vec3 rd = normalize(uv.x * x + uv.y * y + 2.0 * z);
+            // High-frequency hash for dithering (removes banding)
+            float hash12(vec2 p) {
+                vec3 p3  = fract(vec3(p.xyx) * .1031);
+                p3 += dot(p3, p3.yzx + 33.33);
+                return fract((p3.x + p3.y) * p3.z);
+            }
 
-          // Analytic Sphere Intersection (Exact mathematics, infinite detail)
-          float sphereRadius = 1.6;
-          float b_intersect = dot(ro, rd);
-          float c_intersect = dot(ro, ro) - sphereRadius * sphereRadius;
-          float h = b_intersect * b_intersect - c_intersect;
+            // --- INTERNAL KIFS FRACTAL ---
+            // Kaleidoscopic Iterated Function System
+            float mapVol(vec3 p) {
+                vec3 p0 = p;
+                
+                // Slowly evolve the fractal over time
+                float t = u_time * 0.2;
+                p.xz *= rot(t);
+                p.xy *= rot(t * 0.7);
+                
+                float scale = 1.0;
+                // Fold space repeatedly to create infinite internal complexity
+                for(int i = 0; i < 5; i++) {
+                    p = abs(p) - 0.3;
+                    p.xy *= rot(0.5);
+                    p.yz *= rot(0.3);
+                    
+                    // Non-linear scaling
+                    float s = max(1.2 / dot(p, p), 1.0);
+                    p *= s;
+                    scale *= s;
+                }
+                
+                // Combine folded space with a gyroid to create organic "tendrils"
+                float d = length(p) / scale;
+                float gyroid = abs(dot(sin(p0 * 4.0), cos(p0.zxy * 4.0))) * 0.1;
+                
+                return d + gyroid;
+            }
 
-          vec4 finalColor = vec4(0.0); // Default transparent background
+            // Phase Function: Determines how light scatters through gas
+            float phaseHG(float cosTheta, float g) {
+                float g2 = g * g;
+                return (1.0 - g2) / (4.0 * PI * pow(1.0 + g2 - 2.0 * g * cosTheta, 1.5));
+            }
 
-          if (h > 0.0) {
-              h = sqrt(h);
-              float tEnter = -b_intersect - h;
-              float tExit = -b_intersect + h;
+            void main() {
+                // Centered, responsive UV coordinates mapping
+                vec2 uv = (v_uv - 0.5) * 2.0;
+                uv.x *= u_resolution.x / u_resolution.y;
 
-              // Ensure camera is outside the orb
-              if(tEnter > 0.0) {
-                  // --- SHELL BOUNDARY CALCULATIONS ---
-                  vec3 pEnter = ro + rd * tEnter;
-                  vec3 n = normalize(pEnter);
-                  vec3 view = -rd;
+                // Mouse interactivity
+                vec2 m = u_mouse * 2.0 - 1.0;
+                m.x *= u_resolution.x / u_resolution.y;
 
-                  // Refraction Vector (Bending light into the glass)
-                  // 1.0 (Air) to 1.35 (Quantum Glass)
-                  vec3 refrDir = refract(rd, n, 1.0 / 1.35);
+                // Interactive Camera Setup
+                vec3 ro = vec3(sin(m.x*2.0)*3.0, m.y*2.5, cos(m.x*2.0)*3.0);
+                vec3 target = vec3(0.0);
+                vec3 cz = normalize(target - ro);
+                vec3 cx = normalize(cross(vec3(0.0, 1.0, 0.0), cz));
+                vec3 cy = cross(cz, cx);
+                vec3 rd = normalize(uv.x * cx + uv.y * cy + 1.8 * cz); // 1.8 = FOV
 
-                  // Surface Lighting
-                  vec3 lightDir = normalize(vec3(1.0, 3.0, 2.0));
-                  vec3 refDir = reflect(rd, n);
-                  
-                  // Intense Specular Highlight
-                  float spec = pow(max(dot(refDir, lightDir), 0.0), 128.0) * 1.5;
-                  
-                  // Fresnel Effect for glowing rims
-                  float fresnel = pow(1.0 - max(dot(n, view), 0.0), 3.5);
+                // Mathematical intersection with a perfect sphere
+                float radius = 1.6;
+                float b = dot(ro, rd);
+                float c = dot(ro, ro) - radius * radius;
+                float h = b*b - c;
 
-                  // --- VOLUMETRIC MARCHING (THE CORE) ---
-                  int steps = 50; // High sample count for extreme fidelity
-                  float stepSize = (tExit - tEnter) / float(steps);
-                  
-                  vec3 volColor = vec3(0.0);
-                  float transmittance = 1.0; // Starts at 100% light
+                // If ray misses the orb completely, render pure transparent background
+                if(h < 0.0) {
+                    fragColor = vec4(0.0);
+                    return;
+                }
 
-                  for(int i = 0; i < 50; i++) {
-                      // March along the REFRACTED ray, inside the orb
-                      vec3 p = pEnter + refrDir * (float(i) * stepSize);
+                // --- BOUNDARY / OPTICS CALCULATIONS ---
+                h = sqrt(h);
+                float t1 = -b - h; // Ray entry point
+                float t2 = -b + h; // Ray exit point
 
-                      // Morphing the internal space (4D rotation)
-                      p.xy *= rot(u_time * 0.15);
-                      p.xz *= rot(u_time * 0.2);
+                vec3 pIn = ro + rd * t1; // Hit position on shell
+                vec3 normalIn = normalize(pIn);
+                vec3 viewDir = -rd;
 
-                      // High-frequency Gyroid Field for plasma turbulence
-                      float scale = 3.0;
-                      float d = abs(dot(sin(p * scale), cos(p.yzx * scale)));
-                      d = smoothstep(0.0, 0.4, d); // Isolate the dense energy filaments
+                // Dynamic Light Source
+                vec3 lightPos = vec3(sin(u_time)*3.0, 2.0, cos(u_time)*3.0);
+                vec3 lightDir = normalize(lightPos - pIn);
 
-                      // Color based on spatial location, time, and filament density
-                      vec3 emit = palette(d * 1.5 + u_time * 0.5 + length(p));
+                // --- CHROMATIC DISPERSION ---
+                // Bend the light into the sphere. Different colors bend differently.
+                vec3 refractR = refract(rd, normalIn, 1.0 / 1.30);
+                vec3 refractG = refract(rd, normalIn, 1.0 / 1.35);
+                vec3 refractB = refract(rd, normalIn, 1.0 / 1.40);
+                
+                // We will use the green channel as the primary ray for marching
+                vec3 rayDirIn = refractG; 
 
-                      // Calculate optical density at this point
-                      float density = (1.0 - d) * 0.4;
-                      
-                      // Additive light emission attenuated by how much gas we've passed through
-                      volColor += emit * density * transmittance;
-                      
-                      // Beer-Lambert Law: Light exponential decay
-                      transmittance *= exp(-density * stepSize * 8.0);
+                // Shell Surface Optics
+                vec3 reflection = reflect(rd, normalIn);
+                float specular = pow(max(dot(reflection, lightDir), 0.0), 200.0) * 2.5;
+                float fresnel = pow(1.0 - max(dot(normalIn, viewDir), 0.0), 4.0);
 
-                      // Early exit if the gas becomes completely opaque
-                      if(transmittance < 0.01) break;
-                  }
+                // --- VOLUMETRIC PATH MARCHING ---
+                int steps = 60; // Ultra high fidelity
+                float stepSize = (t2 - t1) / float(steps);
+                
+                vec3 volumeColor = vec3(0.0);
+                float densityAcc = 0.0;
+                float transmittance = 1.0;
 
-                  // Combine Volumetric Plasma + Shell Specular + Shell Fresnel
-                  vec3 shellColor = (spec * vec3(1.0)) + (fresnel * palette(u_time * 0.2));
-                  vec3 color = volColor * 1.5 + shellColor; // Boost internal glow
+                // Base colors for the quantum gas
+                vec3 color1 = vec3(0.0, 0.8, 1.0); // Cyan
+                vec3 color2 = vec3(0.9, 0.0, 0.8); // Magenta
 
-                  // Apply ACES Tonemapping for photorealism
-                  color = ACESFilm(color);
+                // Scattering phase based on light direction inside the volume
+                float cosTheta = dot(rayDirIn, lightDir);
+                float phase = phaseHG(cosTheta, 0.6); // Forward scattering
 
-                  // Edge Alpha: Smoothly fade the very edge to prevent jagged clipping
-                  float edgeAlpha = smoothstep(0.0, 0.2, max(dot(n, view), 0.0));
+                // Add spatial dithering to the starting point to eliminate volume banding
+                float dither = hash12(uv + u_time) * stepSize;
 
-                  finalColor = vec4(color, edgeAlpha);
-              }
-          }
+                for(int i = 0; i < 60; i++) {
+                    // March through the internal space
+                    float t = float(i) * stepSize + dither;
+                    vec3 p = pIn + rayDirIn * t;
+                    
+                    // Evaluate the complex fractal field
+                    float dField = mapVol(p);
+                    
+                    // Create sharp, distinct energy filaments
+                    float density = smoothstep(0.15, 0.0, dField) * 1.5;
+                    
+                    if(density > 0.0) {
+                        // Depth-based color shifting
+                        vec3 emitColor = mix(color1, color2, sin(length(p)*2.0 - u_time)*0.5+0.5);
+                        
+                        // How much light is hitting this specific particle
+                        float lightGlow = (0.5 + 0.5 * phase);
+                        
+                        // Add to overall volume
+                        volumeColor += emitColor * density * transmittance * lightGlow * stepSize * 15.0;
+                        
+                        // Beer's Law attenuation
+                        transmittance *= exp(-density * stepSize * 6.0);
+                    }
+                    
+                    // Optimization: stop tracking if the ray hits thick gas and goes dark
+                    if(transmittance < 0.01) break; 
+                }
 
-          gl_FragColor = finalColor;
-      }
-    `;
+                // --- COMPOSITING ---
+                // Outer shell reflection + glowing rim
+                vec3 shellColor = vec3(specular) + fresnel * vec3(0.3, 0.6, 1.0);
+                
+                // Combine volume and shell
+                vec3 finalColor = volumeColor + shellColor;
 
-    function setup() {
-      createCanvas(windowWidth, windowHeight, WEBGL);
-      
-      // CRITICAL: Maximize pixel density. 
-      // If projection is choppy due to massive GPU load, reduce this to 1 or 1.5
-      pixelDensity(window.devicePixelRatio || 2); 
-      
-      quantumShader = createShader(vertShader, fragShader);
-      noStroke();
-    }
+                // Tonemapping and Gamma
+                finalColor = ACESFilm(finalColor);
+                finalColor = pow(finalColor, vec3(1.0/2.2));
 
-    function draw() {
-      clear(0, 0, 0, 0); // Purge frame with pure transparency
+                // Smooth the external boundary edge to prevent jagged aliasing against transparent background
+                float edgeAlpha = smoothstep(0.0, 0.1, max(dot(normalIn, viewDir), 0.0));
 
-      shader(quantumShader);
-      quantumShader.setUniform('u_resolution', [width * pixelDensity(), height * pixelDensity()]);
-      quantumShader.setUniform('u_time', millis() / 1000.0);
-      
-      // Pass normalized mouse coordinates for interactive parallax viewing
-      let mx = mouseX / width;
-      let my = mouseY / height;
-      quantumShader.setUniform('u_mouse', [mx, my]);
+                fragColor = vec4(finalColor, edgeAlpha);
+            }
+        `;
 
-      rectMode(CENTER);
-      rect(0, 0, width, height);
-    }
+        // --- WEBGL COMPILATION ---
+        function compileShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error("Shader Compile Error:", gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
 
-    function windowResized() {
-      resizeCanvas(windowWidth, windowHeight);
-    }
-  </script>
+        const vertexShader = compileShader(gl, gl.VERTEX_SHADER, vsSource);
+        const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, fsSource);
+
+        const program = gl.createProgram();
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+        gl.linkProgram(program);
+        gl.useProgram(program);
+
+        // --- FULL SCREEN GEOMETRY ---
+        // A single large triangle that covers the screen [-1 to 3]
+        const vertices = new Float32Array([
+            -1.0, -1.0,
+             3.0, -1.0,
+            -1.0,  3.0
+        ]);
+        const vao = gl.createVertexArray();
+        gl.bindVertexArray(vao);
+        const vbo = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+        gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+        const posAttrib = gl.getAttribLocation(program, "a_position");
+        gl.enableVertexAttribArray(posAttrib);
+        gl.vertexAttribPointer(posAttrib, 2, gl.FLOAT, false, 0, 0);
+
+        // --- UNIFORMS & RENDER LOOP ---
+        const uResLocation = gl.getUniformLocation(program, "u_resolution");
+        const uTimeLocation = gl.getUniformLocation(program, "u_time");
+        const uMouseLocation = gl.getUniformLocation(program, "u_mouse");
+
+        let mouseX = 0.5, mouseY = 0.5;
+        window.addEventListener('mousemove', (e) => {
+            mouseX = e.clientX / window.innerWidth;
+            mouseY = e.clientY / window.innerHeight;
+        });
+
+        function resize() {
+            // Dynamic resolution matching with hard cap to prevent overheating on ultra-high dpr screens
+            const dpr = Math.min(window.devicePixelRatio || 1, 2.0); 
+            const w = window.innerWidth * dpr;
+            const h = window.innerHeight * dpr;
+            if (canvas.width !== w || canvas.height !== h) {
+                canvas.width = w;
+                canvas.height = h;
+                gl.viewport(0, 0, w, h);
+            }
+        }
+
+        function render(time) {
+            resize();
+            
+            // Clear to perfect transparency
+            gl.clearColor(0.0, 0.0, 0.0, 0.0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            gl.uniform2f(uResLocation, canvas.width, canvas.height);
+            gl.uniform1f(uTimeLocation, time * 0.001);
+            gl.uniform2f(uMouseLocation, mouseX, mouseY);
+
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+            requestAnimationFrame(render);
+        }
+
+        requestAnimationFrame(render);
+    </script>
 </body>
 </html>
