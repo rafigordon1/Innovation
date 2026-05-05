@@ -3,30 +3,96 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Relativistic Singularity Orb</title>
+    <title>FFT-Mapped Quantum Mandelbulb</title>
     <style>
         body, html {
             margin: 0; padding: 0;
             width: 100vw; height: 100vh;
             overflow: hidden;
-            /* Pure transparent background */
             background-color: transparent; 
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
         }
         canvas {
-            display: block;
-            width: 100%; height: 100%;
-            position: absolute; top: 0; left: 0;
+            display: block; width: 100%; height: 100%;
+            position: absolute; top: 0; left: 0; z-index: 1;
+        }
+        #overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; justify-content: center; align-items: center;
+            background: rgba(0, 0, 0, 0.9);
+            color: #fff; z-index: 10; cursor: pointer;
+            transition: opacity 1s ease-in-out; backdrop-filter: blur(10px);
+        }
+        .pulse-text {
+            font-size: 1.2rem; letter-spacing: 0.2em; text-transform: uppercase;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 0.5; }
+            50% { opacity: 1; text-shadow: 0 0 20px rgba(0, 255, 255, 0.8); }
         }
     </style>
 </head>
 <body>
+    <div id="overlay">
+        <div class="pulse-text">Click to Ignite FFT Audio Engine</div>
+    </div>
     <canvas id="glcanvas"></canvas>
 
     <script>
-        const canvas = document.getElementById('glcanvas');
-        const gl = canvas.getContext('webgl2', { alpha: true, antialias: false });
+        // --- AUDIO ENGINE (FFT TEXTURE MAPPING) ---
+        let audioCtx, analyser, dataArray;
+        let audioTexture;
+        let audioInitialized = false;
 
-        if (!gl) alert('WebGL 2 is required for physics simulations.');
+        async function initAudio(gl) {
+            try {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 512; // 256 frequency bins
+                analyser.smoothingTimeConstant = 0.85; 
+                
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const source = audioCtx.createMediaStreamSource(stream);
+                source.connect(analyser);
+                
+                dataArray = new Uint8Array(analyser.frequencyBinCount);
+                
+                // Create a 1D WebGL Texture to hold the Audio Data
+                audioTexture = gl.createTexture();
+                gl.bindTexture(gl.TEXTURE_2D, audioTexture);
+                // 256x1 pixel texture, using LUMINANCE to store single byte data
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, 256, 1, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, dataArray);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+                audioInitialized = true;
+            } catch (err) {
+                console.error("Audio init failed:", err);
+                alert("Microphone required for FFT mapping.");
+            }
+        }
+
+        function updateAudioTexture(gl) {
+            if (!audioInitialized) return;
+            analyser.getByteFrequencyData(dataArray);
+            
+            gl.bindTexture(gl.TEXTURE_2D, audioTexture);
+            // Dynamically update the texture memory with the live audio spectrum
+            gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 256, 1, gl.LUMINANCE, gl.UNSIGNED_BYTE, dataArray);
+        }
+
+        document.getElementById('overlay').addEventListener('click', async function() {
+            await initAudio(gl);
+            this.style.opacity = '0';
+            setTimeout(() => this.style.display = 'none', 1000);
+        });
+
+        // --- WEBGL 2 ENGINE ---
+        const canvas = document.getElementById('glcanvas');
+        const gl = canvas.getContext('webgl2', { alpha: true, antialias: true, premultipliedAlpha: false });
 
         const vsSource = `#version 300 es
             in vec2 a_position;
@@ -45,179 +111,202 @@
 
             uniform vec2 u_resolution;
             uniform float u_time;
+            uniform sampler2D u_audioTex; // The raw FFT data as a texture
 
-            #define MAX_STEPS 100
-            #define PI 3.14159265359
-            
-            // The mass of the singularity dictates how hard it bends light
-            #define GRAVITY_MASS 0.15 
+            #define MAX_STEPS 128
+            #define SURF_DIST 0.001
+            #define MAX_DIST 10.0
 
             mat2 rot(float a) {
                 float s = sin(a), c = cos(a);
                 return mat2(c, -s, s, c);
             }
 
-            // Cinematic ACES Tone Mapping
-            vec3 ACESFilm(vec3 x) {
-                return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14), 0.0, 1.0);
+            // Sample specific audio frequencies (0.0 = Bass, 1.0 = Treble)
+            float getAudio(float freq) {
+                return texture(u_audioTex, vec2(freq, 0.5)).r;
             }
 
-            // High-frequency hash for noise
-            float hash(vec3 p) {
-                p = fract(p * 0.3183099 + .1);
-                p *= 17.0;
-                return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
-            }
-
-            // 3D Noise for the Accretion Disk Plasma
-            float noise(vec3 x) {
-                vec3 i = floor(x);
-                vec3 f = fract(x);
-                f = f * f * (3.0 - 2.0 * f);
-                return mix(mix(mix(hash(i + vec3(0,0,0)), hash(i + vec3(1,0,0)),f.x),
-                               mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)),f.x),f.y),
-                           mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)),f.x),
-                               mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)),f.x),f.y),f.z);
-            }
-
-            // --- FBM Plasma Accretion Disk ---
-            // Generates the glowing matter swirling into the singularity
-            float accretionDisk(vec3 p) {
-                // Flatten space to create a disk
-                vec3 q = p;
-                q.y *= 10.0; // Squeeze into a ring
+            // --- THE AUDIO-REACTIVE MANDELBULB ---
+            // A true 3D fractal where the folding exponent is driven by sound
+            vec2 map(vec3 p) {
+                vec3 z = p;
+                float dr = 1.0;
+                float r = 0.0;
                 
-                float r = length(p.xz);
-                // Cut out the center (event horizon) and fade the edges
-                float diskShape = smoothstep(0.2, 0.6, r) * smoothstep(1.5, 0.6, r);
+                // Get audio for structure driving
+                float bass = getAudio(0.05);
+                float lowMid = getAudio(0.2);
                 
-                // Spin the disk based on distance to simulate orbital mechanics
-                float angle = atan(p.z, p.x);
-                float spin = u_time * (2.0 / (r + 0.1));
+                // Dynamic Power: The fractal morphs from a sphere into an infinitely complex shape on the beat
+                float power = 8.0 + (bass * 4.0 * sin(u_time * 0.5));
                 
-                // Add extreme plasma turbulence
-                vec3 noiseCoord = vec3(p.x * cos(spin) - p.z * sin(spin), p.y, p.x * sin(spin) + p.z * cos(spin));
-                float n = noise(noiseCoord * 5.0 - vec3(0.0, u_time, 0.0));
-                n += 0.5 * noise(noiseCoord * 10.0 + u_time);
-                
-                // Combine shape and turbulence
-                float density = (n * 0.5) * diskShape * exp(-abs(p.y) * 15.0);
-                return max(0.0, density);
-            }
+                // Internal orbit trap to calculate audio-reactive color inside the fractal
+                float trap = 1.0;
 
-            // Single Ray Trace function with Gravitational Lensing
-            vec4 renderRay(vec2 uv, float timeOffset) {
-                vec3 ro = vec3(0.0, 0.5, 3.0); // Camera slightly above the orbital plane
-                vec3 rd = normalize(vec3(uv, -1.5));
-
-                // Tilt camera down to look at the disk
-                rd.yz *= rot(-0.15);
-                ro.yz *= rot(-0.15);
-
-                // --- OUTER GLASS SHELL INTERSECTION ---
-                float shellRadius = 1.4;
-                float b = dot(ro, rd);
-                float c = dot(ro, ro) - shellRadius * shellRadius;
-                float h = b*b - c;
-
-                if(h < 0.0) return vec4(0.0); // Perfect transparent background
-
-                h = sqrt(h);
-                float t1 = -b - h;
-                float t2 = -b + h;
-
-                vec3 pIn = ro + rd * t1;
-                vec3 nIn = normalize(pIn);
-                
-                // Refract light entering the marble
-                vec3 rdIn = refract(rd, nIn, 1.0 / 1.45);
-                if (length(rdIn) < 0.01) rdIn = reflect(rd, nIn); // Total internal reflection fallback
-                
-                // --- RELATIVISTIC PATH MARCHING (GRAVITY LENSING) ---
-                vec3 p = pIn;
-                vec3 v = rdIn; // Ray velocity/direction
-                
-                vec3 col = vec3(0.0);
-                float transmittance = 1.0;
-                float dt = 0.02; // Step size for Euler integration
-                
-                // March through the internal space
-                for(int i = 0; i < 150; i++) {
-                    float r2 = dot(p, p);
+                for (int i = 0; i < 6; i++) {
+                    r = length(z);
+                    if (r > 2.0) break;
                     
-                    // Event Horizon check
-                    if(r2 < 0.04) {
-                        transmittance = 0.0; // Light is eaten by the black hole
-                        break; 
-                    }
+                    // Convert to polar coordinates
+                    float theta = acos(z.z / r);
+                    float phi = atan(z.y, z.x);
                     
-                    // Exit the glass shell
-                    if(r2 > shellRadius * shellRadius) {
-                        break; 
-                    }
-
-                    // --- THE LENSING PHYSICS ---
-                    // Gravity pulls the light ray toward the center
-                    vec3 force = normalize(-p) * (GRAVITY_MASS / r2);
-                    v = normalize(v + force * dt); 
-                    p += v * dt; // Move ray forward
+                    // Audio-driven phase shifting
+                    phi += lowMid * 0.5;
                     
-                    // Sample the accretion disk at this warped location
-                    float density = accretionDisk(p);
+                    dr = pow(r, power - 1.0) * power * dr + 1.0;
                     
-                    if(density > 0.0) {
-                        // Temperature color mapping (hotter blue near center, cooler red far away)
-                        float dist = length(p);
-                        vec3 emitColor = mix(vec3(0.1, 0.4, 1.0), vec3(1.0, 0.2, 0.0), dist);
-                        // Add bright white/cyan core
-                        emitColor = mix(vec3(1.0, 1.0, 1.0), emitColor, smoothstep(0.2, 0.8, dist));
-                        
-                        col += emitColor * density * transmittance * 5.0 * dt;
-                        transmittance *= exp(-density * 10.0 * dt);
-                    }
+                    // Scale and rotate
+                    float zr = pow(r, power);
+                    theta = theta * power;
+                    phi = phi * power;
+                    
+                    // Convert back to cartesian coordinates
+                    z = zr * vec3(sin(theta)*cos(phi), sin(phi)*sin(theta), cos(theta));
+                    z += p;
+                    
+                    trap = min(trap, length(z));
                 }
-
-                // --- OUTER SHELL OPTICS ---
-                vec3 lightDir = normalize(vec3(1.0, 2.0, 1.0));
-                vec3 reflection = reflect(rd, nIn);
-                float specular = pow(max(dot(reflection, lightDir), 0.0), 200.0) * 3.0;
-                float fresnel = pow(1.0 - max(dot(nIn, -rd), 0.0), 5.0);
-
-                vec3 shellColor = vec3(specular) + fresnel * vec3(0.3, 0.5, 0.9);
                 
-                vec3 finalColor = col + shellColor * transmittance;
-                
-                // Edge antialiasing against transparent background
-                float edgeAlpha = smoothstep(0.0, 0.05, max(dot(nIn, -rd), 0.0));
+                // Return distance to fractal surface AND the orbit trap value for coloring
+                return vec2(0.5 * log(r) * r / dr, trap);
+            }
 
-                return vec4(finalColor, edgeAlpha);
+            vec3 getNormal(vec3 p) {
+                float d = map(p).x;
+                vec2 e = vec2(0.001, 0.0);
+                return normalize(vec3(
+                    map(p + e.xyy).x - d,
+                    map(p + e.yxy).x - d,
+                    map(p + e.yyx).x - d
+                ));
+            }
+
+            // Calculates physically accurate soft shadows based on ray marching
+            float softShadow(vec3 ro, vec3 rd, float mint, float maxt, float k) {
+                float res = 1.0;
+                float t = mint;
+                for( int i=0; i<32; i++ ) {
+                    float h = map(ro + rd*t).x;
+                    res = min( res, k*h/t );
+                    t += clamp( h, 0.01, 0.1 );
+                    if( h<0.001 || t>maxt ) break;
+                }
+                return clamp( res, 0.0, 1.0 );
+            }
+
+            // Darkens crevices to give the fractal massive scale and depth
+            float calcAO(vec3 pos, vec3 nor) {
+                float occ = 0.0;
+                float sca = 1.0;
+                for(int i=0; i<5; i++) {
+                    float hr = 0.01 + 0.12*float(i)/4.0;
+                    vec3 aopos = nor * hr + pos;
+                    float dd = map(aopos).x;
+                    occ += -(dd-hr)*sca;
+                    sca *= 0.95;
+                }
+                return clamp(1.0 - 3.0*occ, 0.0, 1.0);
             }
 
             void main() {
                 vec2 uv = (v_uv - 0.5) * 2.0;
                 uv.x *= u_resolution.x / u_resolution.y;
 
-                // --- SUPER-SAMPLING (CINEMATIC ANTI-ALIASING) ---
-                // We cast 3 separate rays per pixel with slight time offsets to create
-                // perfect, noise-free motion blur and ultra-smooth edges.
-                vec4 totalCol = vec4(0.0);
+                // Aggressive, dynamic camera movement
+                vec3 ro = vec3(0.0, 0.0, 2.5);
+                ro.xz *= rot(u_time * 0.2);
+                ro.yz *= rot(sin(u_time * 0.1) * 0.5);
                 
-                totalCol += renderRay(uv, u_time);
-                totalCol += renderRay(uv, u_time - 0.005);
-                totalCol += renderRay(uv, u_time - 0.010);
-                
-                totalCol /= 3.0; // Average the samples
+                vec3 target = vec3(0.0);
+                vec3 z = normalize(target - ro);
+                vec3 x = normalize(cross(vec3(0.0, 1.0, 0.0), z));
+                vec3 y = cross(z, x);
+                vec3 rd = normalize(uv.x * x + uv.y * y + 1.2 * z);
 
-                if(totalCol.a <= 0.0) {
+                // --- BOUNDING SPHERE OPTIMIZATION ---
+                // Check if ray hits the general area before doing expensive fractal math
+                float b = dot(ro, rd);
+                float c = dot(ro, ro) - 1.5 * 1.5;
+                float h = b*b - c;
+
+                if(h < 0.0) {
+                    fragColor = vec4(0.0); // Transparent background
+                    return;
+                }
+
+                // --- RAYMARCH THE FRACTAL ---
+                float t = 0.0;
+                float trap = 0.0;
+                float steps = 0.0;
+                
+                for(int i = 0; i < MAX_STEPS; i++) {
+                    vec3 p = ro + rd * t;
+                    vec2 result = map(p);
+                    float d = result.x;
+                    
+                    if(d < SURF_DIST || t > MAX_DIST) {
+                        trap = result.y;
+                        break;
+                    }
+                    t += d;
+                    steps++;
+                }
+
+                if(t > MAX_DIST) {
                     fragColor = vec4(0.0);
                     return;
                 }
 
-                // Cinematic Tonemapping
-                totalCol.rgb = ACESFilm(totalCol.rgb);
-                totalCol.rgb = pow(totalCol.rgb, vec3(1.0/2.2)); // Gamma correction
+                vec3 p = ro + rd * t;
+                vec3 n = getNormal(p);
+                vec3 viewDir = normalize(ro - p);
 
-                fragColor = totalCol;
+                // Lighting
+                vec3 lightPos = vec3(2.0 * sin(u_time), 3.0, 2.0 * cos(u_time));
+                vec3 lDir = normalize(lightPos - p);
+                
+                float diff = max(dot(n, lDir), 0.0);
+                float spec = pow(max(dot(viewDir, reflect(-lDir, n)), 0.0), 64.0);
+                float fresnel = pow(1.0 - max(dot(n, viewDir), 0.0), 4.0);
+                
+                // Apply Shadows and AO
+                float shadow = softShadow(p, lDir, 0.05, 5.0, 16.0);
+                float ao = calcAO(p, n);
+
+                // --- AUDIO-REACTIVE MATERIAL ---
+                // Sample different frequency bands for color mixing
+                float highFreq = getAudio(0.8);
+                float midFreq = getAudio(0.4);
+                
+                // Color mapping based on fractal depth (trap) and live audio
+                vec3 colorDark = vec3(0.02, 0.05, 0.1);
+                vec3 colorMid = vec3(0.1, 0.5, 0.9) * (1.0 + midFreq);
+                vec3 colorEnergy = vec3(1.0, 0.2 + highFreq*0.8, 0.8) * (highFreq * 3.0);
+                
+                vec3 albedo = mix(colorDark, colorMid, clamp(trap * 2.0, 0.0, 1.0));
+                
+                // Ignition: The deepest parts of the fractal glow violently on high hats/snares
+                float ignition = smoothstep(0.1, 0.0, trap) * highFreq;
+
+                vec3 finalColor = albedo * (diff * shadow * ao + 0.1 * ao);
+                finalColor += spec * shadow * (1.0 + highFreq);
+                finalColor += fresnel * colorMid * ao;
+                finalColor += colorEnergy * ignition * 5.0; // Overblown emission
+
+                // Volumetric glow based on ray steps (simulates dense plasma around the fractal)
+                float glow = pow(steps / float(MAX_STEPS), 2.0);
+                finalColor += vec3(0.0, 0.4, 1.0) * glow * (0.5 + getAudio(0.1));
+
+                // ACES Tonemapping
+                finalColor = clamp((finalColor*(2.51*finalColor+0.03))/(finalColor*(2.43*finalColor+0.59)+0.14), 0.0, 1.0);
+                finalColor = pow(finalColor, vec3(1.0/2.2));
+
+                // Edge smoothing against the transparent void
+                float edgeAlpha = smoothstep(0.0, 0.2, max(dot(n, viewDir), 0.0));
+
+                fragColor = vec4(finalColor, edgeAlpha);
             }
         `;
 
@@ -226,7 +315,7 @@
             gl.shaderSource(shader, source);
             gl.compileShader(shader);
             if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-                console.error("Shader Compile Error:", gl.getShaderInfoLog(shader));
+                console.error("Shader Error:", gl.getShaderInfoLog(shader));
                 return null;
             }
             return shader;
@@ -250,6 +339,7 @@
 
         const locRes = gl.getUniformLocation(program, "u_resolution");
         const locTime = gl.getUniformLocation(program, "u_time");
+        const locAudio = gl.getUniformLocation(program, "u_audioTex");
 
         function render(time) {
             const dpr = Math.min(window.devicePixelRatio || 1, 2.0); 
@@ -260,11 +350,18 @@
                 gl.viewport(0, 0, w, h);
             }
 
+            updateAudioTexture(gl);
+
             gl.clearColor(0.0, 0.0, 0.0, 0.0);
             gl.clear(gl.COLOR_BUFFER_BIT);
 
             gl.uniform2f(locRes, canvas.width, canvas.height);
             gl.uniform1f(locTime, time * 0.001);
+            
+            // Bind the audio texture to texture unit 0
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, audioTexture);
+            gl.uniform1i(locAudio, 0);
 
             gl.drawArrays(gl.TRIANGLES, 0, 3);
             requestAnimationFrame(render);
