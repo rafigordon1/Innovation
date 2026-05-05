@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Relativistic Singularity Orb</title>
+    <style>
+        body, html {
+            margin: 0; padding: 0;
+            width: 100vw; height: 100vh;
+            overflow: hidden;
+            /* Pure transparent background */
+            background-color: transparent; 
+        }
+        canvas {
+            display: block;
+            width: 100%; height: 100%;
+            position: absolute; top: 0; left: 0;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="glcanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('glcanvas');
+        const gl = canvas.getContext('webgl2', { alpha: true, antialias: false });
+
+        if (!gl) alert('WebGL 2 is required for physics simulations.');
+
+        const vsSource = `#version 300 es
+            in vec2 a_position;
+            out vec2 v_uv;
+            void main() {
+                v_uv = a_position * 0.5 + 0.5;
+                gl_Position = vec4(a_position, 0.0, 1.0);
+            }
+        `;
+
+        const fsSource = `#version 300 es
+            precision highp float;
+            
+            in vec2 v_uv;
+            out vec4 fragColor;
+
+            uniform vec2 u_resolution;
+            uniform float u_time;
+
+            #define MAX_STEPS 100
+            #define PI 3.14159265359
+            
+            // The mass of the singularity dictates how hard it bends light
+            #define GRAVITY_MASS 0.15 
+
+            mat2 rot(float a) {
+                float s = sin(a), c = cos(a);
+                return mat2(c, -s, s, c);
+            }
+
+            // Cinematic ACES Tone Mapping
+            vec3 ACESFilm(vec3 x) {
+                return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14), 0.0, 1.0);
+            }
+
+            // High-frequency hash for noise
+            float hash(vec3 p) {
+                p = fract(p * 0.3183099 + .1);
+                p *= 17.0;
+                return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+            }
+
+            // 3D Noise for the Accretion Disk Plasma
+            float noise(vec3 x) {
+                vec3 i = floor(x);
+                vec3 f = fract(x);
+                f = f * f * (3.0 - 2.0 * f);
+                return mix(mix(mix(hash(i + vec3(0,0,0)), hash(i + vec3(1,0,0)),f.x),
+                               mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)),f.x),f.y),
+                           mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)),f.x),
+                               mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)),f.x),f.y),f.z);
+            }
+
+            // --- FBM Plasma Accretion Disk ---
+            // Generates the glowing matter swirling into the singularity
+            float accretionDisk(vec3 p) {
+                // Flatten space to create a disk
+                vec3 q = p;
+                q.y *= 10.0; // Squeeze into a ring
+                
+                float r = length(p.xz);
+                // Cut out the center (event horizon) and fade the edges
+                float diskShape = smoothstep(0.2, 0.6, r) * smoothstep(1.5, 0.6, r);
+                
+                // Spin the disk based on distance to simulate orbital mechanics
+                float angle = atan(p.z, p.x);
+                float spin = u_time * (2.0 / (r + 0.1));
+                
+                // Add extreme plasma turbulence
+                vec3 noiseCoord = vec3(p.x * cos(spin) - p.z * sin(spin), p.y, p.x * sin(spin) + p.z * cos(spin));
+                float n = noise(noiseCoord * 5.0 - vec3(0.0, u_time, 0.0));
+                n += 0.5 * noise(noiseCoord * 10.0 + u_time);
+                
+                // Combine shape and turbulence
+                float density = (n * 0.5) * diskShape * exp(-abs(p.y) * 15.0);
+                return max(0.0, density);
+            }
+
+            // Single Ray Trace function with Gravitational Lensing
+            vec4 renderRay(vec2 uv, float timeOffset) {
+                vec3 ro = vec3(0.0, 0.5, 3.0); // Camera slightly above the orbital plane
+                vec3 rd = normalize(vec3(uv, -1.5));
+
+                // Tilt camera down to look at the disk
+                rd.yz *= rot(-0.15);
+                ro.yz *= rot(-0.15);
+
+                // --- OUTER GLASS SHELL INTERSECTION ---
+                float shellRadius = 1.4;
+                float b = dot(ro, rd);
+                float c = dot(ro, ro) - shellRadius * shellRadius;
+                float h = b*b - c;
+
+                if(h < 0.0) return vec4(0.0); // Perfect transparent background
+
+                h = sqrt(h);
+                float t1 = -b - h;
+                float t2 = -b + h;
+
+                vec3 pIn = ro + rd * t1;
+                vec3 nIn = normalize(pIn);
+                
+                // Refract light entering the marble
+                vec3 rdIn = refract(rd, nIn, 1.0 / 1.45);
+                if (length(rdIn) < 0.01) rdIn = reflect(rd, nIn); // Total internal reflection fallback
+                
+                // --- RELATIVISTIC PATH MARCHING (GRAVITY LENSING) ---
+                vec3 p = pIn;
+                vec3 v = rdIn; // Ray velocity/direction
+                
+                vec3 col = vec3(0.0);
+                float transmittance = 1.0;
+                float dt = 0.02; // Step size for Euler integration
+                
+                // March through the internal space
+                for(int i = 0; i < 150; i++) {
+                    float r2 = dot(p, p);
+                    
+                    // Event Horizon check
+                    if(r2 < 0.04) {
+                        transmittance = 0.0; // Light is eaten by the black hole
+                        break; 
+                    }
+                    
+                    // Exit the glass shell
+                    if(r2 > shellRadius * shellRadius) {
+                        break; 
+                    }
+
+                    // --- THE LENSING PHYSICS ---
+                    // Gravity pulls the light ray toward the center
+                    vec3 force = normalize(-p) * (GRAVITY_MASS / r2);
+                    v = normalize(v + force * dt); 
+                    p += v * dt; // Move ray forward
+                    
+                    // Sample the accretion disk at this warped location
+                    float density = accretionDisk(p);
+                    
+                    if(density > 0.0) {
+                        // Temperature color mapping (hotter blue near center, cooler red far away)
+                        float dist = length(p);
+                        vec3 emitColor = mix(vec3(0.1, 0.4, 1.0), vec3(1.0, 0.2, 0.0), dist);
+                        // Add bright white/cyan core
+                        emitColor = mix(vec3(1.0, 1.0, 1.0), emitColor, smoothstep(0.2, 0.8, dist));
+                        
+                        col += emitColor * density * transmittance * 5.0 * dt;
+                        transmittance *= exp(-density * 10.0 * dt);
+                    }
+                }
+
+                // --- OUTER SHELL OPTICS ---
+                vec3 lightDir = normalize(vec3(1.0, 2.0, 1.0));
+                vec3 reflection = reflect(rd, nIn);
+                float specular = pow(max(dot(reflection, lightDir), 0.0), 200.0) * 3.0;
+                float fresnel = pow(1.0 - max(dot(nIn, -rd), 0.0), 5.0);
+
+                vec3 shellColor = vec3(specular) + fresnel * vec3(0.3, 0.5, 0.9);
+                
+                vec3 finalColor = col + shellColor * transmittance;
+                
+                // Edge antialiasing against transparent background
+                float edgeAlpha = smoothstep(0.0, 0.05, max(dot(nIn, -rd), 0.0));
+
+                return vec4(finalColor, edgeAlpha);
+            }
+
+            void main() {
+                vec2 uv = (v_uv - 0.5) * 2.0;
+                uv.x *= u_resolution.x / u_resolution.y;
+
+                // --- SUPER-SAMPLING (CINEMATIC ANTI-ALIASING) ---
+                // We cast 3 separate rays per pixel with slight time offsets to create
+                // perfect, noise-free motion blur and ultra-smooth edges.
+                vec4 totalCol = vec4(0.0);
+                
+                totalCol += renderRay(uv, u_time);
+                totalCol += renderRay(uv, u_time - 0.005);
+                totalCol += renderRay(uv, u_time - 0.010);
+                
+                totalCol /= 3.0; // Average the samples
+
+                if(totalCol.a <= 0.0) {
+                    fragColor = vec4(0.0);
+                    return;
+                }
+
+                // Cinematic Tonemapping
+                totalCol.rgb = ACESFilm(totalCol.rgb);
+                totalCol.rgb = pow(totalCol.rgb, vec3(1.0/2.2)); // Gamma correction
+
+                fragColor = totalCol;
+            }
+        `;
+
+        function compileShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error("Shader Compile Error:", gl.getShaderInfoLog(shader));
+                return null;
+            }
+            return shader;
+        }
+
+        const program = gl.createProgram();
+        gl.attachShader(program, compileShader(gl, gl.VERTEX_SHADER, vsSource));
+        gl.attachShader(program, compileShader(gl, gl.FRAGMENT_SHADER, fsSource));
+        gl.linkProgram(program);
+        gl.useProgram(program);
+
+        const vertices = new Float32Array([-1,-1, 3,-1, -1,3]);
+        const vao = gl.createVertexArray();
+        gl.bindVertexArray(vao);
+        const vbo = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+        gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+        const posAttrib = gl.getAttribLocation(program, "a_position");
+        gl.enableVertexAttribArray(posAttrib);
+        gl.vertexAttribPointer(posAttrib, 2, gl.FLOAT, false, 0, 0);
+
+        const locRes = gl.getUniformLocation(program, "u_resolution");
+        const locTime = gl.getUniformLocation(program, "u_time");
+
+        function render(time) {
+            const dpr = Math.min(window.devicePixelRatio || 1, 2.0); 
+            const w = window.innerWidth * dpr;
+            const h = window.innerHeight * dpr;
+            if (canvas.width !== w || canvas.height !== h) {
+                canvas.width = w; canvas.height = h;
+                gl.viewport(0, 0, w, h);
+            }
+
+            gl.clearColor(0.0, 0.0, 0.0, 0.0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            gl.uniform2f(locRes, canvas.width, canvas.height);
+            gl.uniform1f(locTime, time * 0.001);
+
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+            requestAnimationFrame(render);
+        }
+
+        requestAnimationFrame(render);
+    </script>
+</body>
+</html>
