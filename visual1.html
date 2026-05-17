@@ -11,7 +11,7 @@
             width: 100%;
             height: 100%;
             overflow: hidden;
-            background-color: #000;
+            background-color: #050505;
             font-family: sans-serif;
         }
         canvas {
@@ -22,7 +22,11 @@
             height: 100%;
         }
         #webgl-canvas { z-index: 1; }
-        #overlay-canvas { z-index: 2; mix-blend-mode: screen; }
+        #overlay-canvas { 
+            z-index: 2; 
+            background: transparent; 
+            pointer-events: none; 
+        }
         #strobe-layer {
             position: absolute;
             top: 0; left: 0; width: 100%; height: 100%;
@@ -40,7 +44,7 @@
             align-items: center;
             width: 100%;
             height: 100%;
-            background: rgba(0,0,0,0.8);
+            background: rgba(0,0,0,0.85);
             cursor: pointer;
             font-size: 24px;
             letter-spacing: 2px;
@@ -51,7 +55,7 @@
 </head>
 <body>
 
-<div id="start-screen">Click anywhere to start audio visualizer</div>
+<div id="start-screen">Click to initialize audio visualizer</div>
 <canvas id="webgl-canvas"></canvas>
 <canvas id="overlay-canvas"></canvas>
 <div id="strobe-layer"></div>
@@ -63,69 +67,67 @@
     let isRunning = false;
     let lastTime = 0;
     
-    // BPM & Beat sync
     let lastTapTime = 0;
-    let bpmInterval = 500; // ms per beat (120 BPM default)
+    let bpmInterval = 500; 
     let lastBeatTrigger = 0;
 
-    // Rate of Change State (0.0 to 1.0)
-    const keyTimestamps = {};
-    const params = {
-        hueSpeed: 0.2,      // Key 1
-        strobeRate: 0.0,    // Key 2
-        circleDensity: 0.3, // Key 3
-        arrowDensity: 0.3,  // Key 4
-        bgDensity: 0.5,     // Key 5
-        bgSpeed: 0.5,       // Key 6
-        glitchIntens: 0.1   // Left Arrow
+    // Advanced Rate of Change Engine
+    // Calculates exact millisecond delta between presses (50ms = extremely fast, 4000ms = extremely slow)
+    const keyState = {
+        '1': { lastPress: 0, delta: 2000 },
+        '2': { lastPress: 0, delta: 2000 },
+        '3': { lastPress: 0, delta: 2000 },
+        '4': { lastPress: 0, delta: 2000 },
+        '5': { lastPress: 0, delta: 2000 },
+        '6': { lastPress: 0, delta: 2000 },
+        'ArrowLeft': { lastPress: 0, delta: 2000 }
     };
 
-    // Circles array
+    const colors = [
+        {r: 255, g: 182, b: 193}, // Soft pink
+        {r: 173, g: 216, b: 230}, // Soft blue
+        {r: 255, g: 255, b: 255}  // White
+    ];
+    // Exact 45, 90, 135, 180 degrees in radians
+    const angles = [Math.PI/4, Math.PI/2, Math.PI*0.75, Math.PI]; 
     const activeEntities = [];
-    const colors = ['#FFC0CB', '#ADD8E6', '#FFFFFF']; // Soft pink, soft blue, white
-    const angles = [Math.PI/4, Math.PI/2, Math.PI*0.75, Math.PI]; // 45, 90, 135, 180 deg
 
-    // --- RATE OF CHANGE LOGIC ---
-    function updateRate(key, paramKey) {
+    // --- INPUT LOGIC ---
+    function updateRate(key) {
         const now = performance.now();
-        if (keyTimestamps[key]) {
-            const delta = now - keyTimestamps[key];
-            // Faster presses = smaller delta. Map 50ms (fast) to 1000ms (slow)
-            let rate = Math.max(0, Math.min(1, 1 - (delta - 50) / 950));
-            params[paramKey] = params[paramKey] * 0.5 + rate * 0.5; // Smooth
+        const state = keyState[key];
+        if (state.lastPress > 0) {
+            let d = now - state.lastPress;
+            if (d < 4000) { 
+                // Smooth out the delta so it doesn't jump wildly on one off-beat press
+                state.delta = (state.delta * 0.4) + (d * 0.6);
+            }
         }
-        keyTimestamps[key] = now;
+        state.lastPress = now;
     }
 
-    // Decay rates over time
-    setInterval(() => {
-        if(params.strobeRate > 0) params.strobeRate = Math.max(0, params.strobeRate - 0.05);
-        if(params.glitchIntens > 0.1) params.glitchIntens -= 0.01;
-    }, 100);
+    // Maps a time delta to a visual parameter range
+    function mapDelta(delta, fastVal, slowVal) {
+        let clamped = Math.max(50, Math.min(4000, delta));
+        let t = (clamped - 50) / (4000 - 50); // 0 = fast, 1 = slow
+        return fastVal + t * (slowVal - fastVal);
+    }
 
     window.addEventListener('keydown', (e) => {
         if (!isRunning) return;
-        switch(e.key) {
-            case '1': updateRate('1', 'hueSpeed'); break;
-            case '2': updateRate('2', 'strobeRate'); break;
-            case '3': updateRate('3', 'circleDensity'); break;
-            case '4': updateRate('4', 'arrowDensity'); break;
-            case '5': updateRate('5', 'bgDensity'); break;
-            case '6': updateRate('6', 'bgSpeed'); break;
-            case 'ArrowLeft': updateRate('ArrowLeft', 'glitchIntens'); break;
-            case 'ArrowRight': // BPM Tapper
-                const now = performance.now();
-                if (lastTapTime > 0 && (now - lastTapTime) < 2000) {
-                    bpmInterval = now - lastTapTime;
-                }
-                lastTapTime = now;
-                lastBeatTrigger = now; // Force beat sync
-                spawnEntities();
-                break;
-            case ' ': // Spacebar Morph
-                document.body.style.opacity = 0;
-                setTimeout(() => window.location.href = 'visual2.html', 2000);
-                break;
+        if (keyState[e.key] !== undefined) {
+            updateRate(e.key);
+        } else if (e.key === 'ArrowRight') {
+            const now = performance.now();
+            if (lastTapTime > 0 && (now - lastTapTime) < 2000) {
+                bpmInterval = now - lastTapTime;
+            }
+            lastTapTime = now;
+            lastBeatTrigger = now; 
+            spawnEntities();
+        } else if (e.key === ' ') {
+            document.body.style.opacity = 0;
+            setTimeout(() => window.location.href = 'visual2.html', 2000);
         }
     });
 
@@ -144,14 +146,14 @@
             isRunning = true;
             requestAnimationFrame(render);
         } catch (err) {
-            alert("Microphone access denied or unavailable. Visualizer needs audio.");
+            alert("Microphone access required.");
         }
     }
     document.getElementById('start-screen').addEventListener('click', initAudio);
 
-    // --- WEBGL SHADER BACKGROUND ---
+    // --- WEBGL BACKGROUND ---
     const glCanvas = document.getElementById('webgl-canvas');
-    const gl = glCanvas.getContext('webgl');
+    const gl = glCanvas.getContext('webgl', { alpha: false });
 
     const vsSource = `
         attribute vec2 position;
@@ -168,9 +170,8 @@
         uniform float u_speed;
         uniform float u_glitch;
 
-        // Hue shift function
         vec3 hueShift(vec3 color, float hue) {
-            const vec3 k = vec3(0.57735, 0.57735, 0.57735);
+            const vec3 k = vec3(0.57735);
             float cosAngle = cos(hue);
             return vec3(color * cosAngle + cross(k, color) * sin(hue) + k * dot(k, color) * (1.0 - cosAngle));
         }
@@ -180,57 +181,41 @@
             return mat2(c, -s, s, c);
         }
 
-        // Industrial Box/Tunnel Distance Function
         float map(vec3 p) {
             vec3 q = p;
+            q.z -= u_time * u_speed;
+            q.x += sin(q.z * 5.0 + u_time) * u_glitch * 0.5;
             
-            // Forward movement mapped to speed param
-            q.z -= u_time * (1.0 + u_speed * 4.0);
-            
-            // Glitch distortion
-            q.x += sin(q.z * 2.0 + u_time) * u_glitch;
-            
-            // Modulo repetition for infinite tunnel based on density
-            float spacing = 2.0 - (u_density * 1.5); 
+            float spacing = u_density; 
             q.xy = mod(q.xy + spacing * 0.5, spacing) - spacing * 0.5;
-            q.xy *= rot(q.z * 0.1);
+            q.xy *= rot(q.z * 0.05);
             
-            // Box structure (industrial beams)
-            vec3 d = abs(q) - vec3(0.2 + u_audio * 0.3);
+            vec3 d = abs(q) - vec3(0.1 + u_audio * 0.2);
             return min(max(d.x, max(d.y, d.z)), 0.0) + length(max(d, 0.0));
         }
 
         void main() {
             vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / u_resolution.y;
-            
-            // Camera setup
-            vec3 ro = vec3(0.0, 0.0, -3.0);
+            vec3 ro = vec3(0.0, 0.0, -2.0);
             vec3 rd = normalize(vec3(uv, 1.0));
             
-            // Raymarching loop
             float t = 0.0;
-            for(int i = 0; i < 64; i++) {
+            for(int i = 0; i < 80; i++) {
                 vec3 p = ro + rd * t;
                 float d = map(p);
-                if(d < 0.001 || t > 20.0) break;
+                if(d < 0.001 || t > 15.0) break;
                 t += d;
             }
             
-            // Coloring
             vec3 col = vec3(0.0);
-            if(t < 20.0) {
-                float fog = exp(-0.1 * t);
-                // Base industrial color (dark metallic / toxic glow)
-                col = vec3(0.1, 0.15, 0.2) * fog;
-                // Audio reactive glow
-                col += vec3(0.5, 0.2, 0.8) * u_audio * fog * 2.0;
+            if(t < 15.0) {
+                float fog = exp(-0.15 * t);
+                col = vec3(0.15, 0.15, 0.18) * fog; // Industrial concrete/steel base
+                col += vec3(0.6, 0.2, 0.9) * u_audio * fog * 1.5; // Neon bleed
             }
             
-            col = hueShift(col, u_time * u_hueSpeed * 5.0);
-            
-            // Vignette
-            col *= 1.0 - dot(uv, uv) * 0.5;
-
+            col = hueShift(col, u_time * u_hueSpeed);
+            col *= 1.0 - dot(uv, uv) * 0.7; // Heavy vignette for basement feel
             gl_FragColor = vec4(col, 1.0);
         }
     `;
@@ -269,46 +254,57 @@
         glCanvas.width = window.innerWidth;
         glCanvas.height = window.innerHeight;
         gl.viewport(0, 0, glCanvas.width, glCanvas.height);
-        
         ctxCanvas.width = window.innerWidth;
         ctxCanvas.height = window.innerHeight;
     }
     window.addEventListener('resize', resize);
     
-    // --- 2D FOREGROUND & ENTITIES ---
+    // --- 2D FOREGROUND ---
     const ctxCanvas = document.getElementById('overlay-canvas');
     const ctx = ctxCanvas.getContext('2d');
     resize();
 
-    function drawArrow(x, y, size, angle) {
+    function drawFineArrow(x, y, radius, angle, alpha) {
         ctx.save();
         ctx.translate(x, y);
         ctx.rotate(angle);
+        
+        ctx.strokeStyle = `rgba(0, 0, 0, ${alpha})`;
+        ctx.lineWidth = 2.5; // Fine but visible line
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        let startOff = radius + 10; 
+        let lineLength = radius + 150; // Long line extending far past circle
+
         ctx.beginPath();
-        ctx.moveTo(0, -size);
-        ctx.lineTo(size/2, size/2);
-        ctx.lineTo(0, size/4);
-        ctx.lineTo(-size/2, size/2);
-        ctx.closePath();
-        ctx.fillStyle = '#000000';
-        ctx.fill();
-        ctx.strokeStyle = '#FFFFFF';
-        ctx.lineWidth = 2;
+        ctx.moveTo(0, -startOff);
+        ctx.lineTo(0, -lineLength);
+        
+        // Fine arrowhead pointing outwards
+        ctx.lineTo(-8, -lineLength + 20);
+        ctx.moveTo(0, -lineLength);
+        ctx.lineTo(8, -lineLength + 20);
+        
         ctx.stroke();
         ctx.restore();
     }
 
     function spawnEntities() {
-        // Amount based on Key 3 (circleDensity)
-        let count = Math.floor(1 + params.circleDensity * 10);
+        let spawnChance = mapDelta(keyState['3'].delta, 1.0, 0.05); // Density maps to amount
+        if (Math.random() > spawnChance) return;
+
+        let arrowChance = mapDelta(keyState['4'].delta, 1.0, 0.0);
+        
+        let count = Math.floor(1 + Math.random() * 3);
         for(let i=0; i<count; i++) {
             activeEntities.push({
                 x: Math.random() * ctxCanvas.width,
                 y: Math.random() * ctxCanvas.height,
-                radius: 10 + Math.random() * 80 * audioEnergy,
+                radius: 5 + Math.random() * 50 * audioEnergy,
                 color: colors[Math.floor(Math.random() * colors.length)],
                 life: 1.0,
-                hasArrow: Math.random() < params.arrowDensity, // Key 4
+                hasArrow: Math.random() < arrowChance,
                 arrowAngle: angles[Math.floor(Math.random() * angles.length)]
             });
         }
@@ -318,38 +314,43 @@
     function render(time) {
         requestAnimationFrame(render);
         
-        // Analyze Audio
         analyser.getByteFrequencyData(dataArray);
         let sum = 0;
         for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
         audioEnergy = sum / dataArray.length / 255;
 
-        // Auto Beat Sync / Tapper Sync
         if (time - lastBeatTrigger > bpmInterval) {
-            // Trigger on energy spike or strict interval
             if (audioEnergy > 0.4 || (time - lastTapTime > 0)) {
                 spawnEntities();
                 lastBeatTrigger = time;
             }
         }
 
-        // Render WebGL Background
+        // Apply advanced mapped parameters based on exact tap frequencies
+        let dynHueSpeed = mapDelta(keyState['1'].delta, 4.0, 0.1);
+        let dynStrobeSpeed = mapDelta(keyState['2'].delta, 30.0, 2.0); 
+        let dynStrobeIntens = mapDelta(keyState['2'].delta, 1.0, 0.0);
+        let dynBgDensity = mapDelta(keyState['5'].delta, 0.5, 3.0); // Fast = dense (smaller spacing)
+        let dynBgSpeed = mapDelta(keyState['6'].delta, 15.0, 1.0);
+        let dynGlitch = mapDelta(keyState['ArrowLeft'].delta, 2.0, 0.0);
+
+        // WebGL Draw
         gl.uniform2f(uniforms.res, glCanvas.width, glCanvas.height);
         gl.uniform1f(uniforms.time, time * 0.001);
         gl.uniform1f(uniforms.audio, audioEnergy);
-        gl.uniform1f(uniforms.hueSpeed, params.hueSpeed);
-        gl.uniform1f(uniforms.density, params.bgDensity);
-        gl.uniform1f(uniforms.speed, params.bgSpeed);
-        gl.uniform1f(uniforms.glitch, params.glitchIntens);
+        gl.uniform1f(uniforms.hueSpeed, dynHueSpeed);
+        gl.uniform1f(uniforms.density, dynBgDensity);
+        gl.uniform1f(uniforms.speed, dynBgSpeed);
+        gl.uniform1f(uniforms.glitch, dynGlitch);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-        // Render 2D Foreground
+        // 2D Draw
         ctx.clearRect(0, 0, ctxCanvas.width, ctxCanvas.height);
         
         for (let i = activeEntities.length - 1; i >= 0; i--) {
             let e = activeEntities[i];
-            e.life -= 0.02 + (params.bgSpeed * 0.05); // Fade out
-            e.radius += 1.5; // Expand
+            e.life -= 0.01 + (audioEnergy * 0.02);
+            e.radius += 2.0 + (audioEnergy * 5.0);
 
             if (e.life <= 0) {
                 activeEntities.splice(i, 1);
@@ -358,21 +359,19 @@
 
             ctx.beginPath();
             ctx.arc(e.x, e.y, e.radius, 0, Math.PI * 2);
-            ctx.fillStyle = e.color + Math.floor(e.life * 255).toString(16).padStart(2, '0');
+            ctx.fillStyle = `rgba(${e.color.r}, ${e.color.g}, ${e.color.b}, ${e.life})`;
             ctx.fill();
 
             if (e.hasArrow) {
-                // Arrow size correlates to circle
-                drawArrow(e.x, e.y, e.radius * 0.5, e.arrowAngle);
+                drawFineArrow(e.x, e.y, e.radius, e.arrowAngle, e.life);
             }
         }
 
-        // Strobe Effect (Key 2)
+        // Strobe logic
         const strobeLayer = document.getElementById('strobe-layer');
-        if (params.strobeRate > 0.05) {
-            // High strobe rate = fast flashes
-            let flash = Math.sin(time * params.strobeRate * 0.1) > 0 ? params.strobeRate : 0;
-            strobeLayer.style.opacity = flash * audioEnergy;
+        if (dynStrobeIntens > 0.05) {
+            let flash = Math.sin(time * 0.001 * dynStrobeSpeed) > 0 ? dynStrobeIntens : 0;
+            strobeLayer.style.opacity = flash * (0.3 + audioEnergy * 0.7);
         } else {
             strobeLayer.style.opacity = 0;
         }
