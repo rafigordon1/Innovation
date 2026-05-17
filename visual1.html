@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audioactive Visualizer - Industrial Techno</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+            font-family: sans-serif;
+        }
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        #webgl-canvas { z-index: 1; }
+        #overlay-canvas { z-index: 2; mix-blend-mode: screen; }
+        #strobe-layer {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: white;
+            opacity: 0;
+            z-index: 3;
+            pointer-events: none;
+        }
+        #start-screen {
+            position: absolute;
+            z-index: 10;
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            cursor: pointer;
+            font-size: 24px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+        body { transition: opacity 2s ease-in-out; }
+    </style>
+</head>
+<body>
+
+<div id="start-screen">Click anywhere to start audio visualizer</div>
+<canvas id="webgl-canvas"></canvas>
+<canvas id="overlay-canvas"></canvas>
+<div id="strobe-layer"></div>
+
+<script>
+    // --- STATE & CONFIG ---
+    let audioContext, analyser, dataArray;
+    let audioEnergy = 0;
+    let isRunning = false;
+    let lastTime = 0;
+    
+    // BPM & Beat sync
+    let lastTapTime = 0;
+    let bpmInterval = 500; // ms per beat (120 BPM default)
+    let lastBeatTrigger = 0;
+
+    // Rate of Change State (0.0 to 1.0)
+    const keyTimestamps = {};
+    const params = {
+        hueSpeed: 0.2,      // Key 1
+        strobeRate: 0.0,    // Key 2
+        circleDensity: 0.3, // Key 3
+        arrowDensity: 0.3,  // Key 4
+        bgDensity: 0.5,     // Key 5
+        bgSpeed: 0.5,       // Key 6
+        glitchIntens: 0.1   // Left Arrow
+    };
+
+    // Circles array
+    const activeEntities = [];
+    const colors = ['#FFC0CB', '#ADD8E6', '#FFFFFF']; // Soft pink, soft blue, white
+    const angles = [Math.PI/4, Math.PI/2, Math.PI*0.75, Math.PI]; // 45, 90, 135, 180 deg
+
+    // --- RATE OF CHANGE LOGIC ---
+    function updateRate(key, paramKey) {
+        const now = performance.now();
+        if (keyTimestamps[key]) {
+            const delta = now - keyTimestamps[key];
+            // Faster presses = smaller delta. Map 50ms (fast) to 1000ms (slow)
+            let rate = Math.max(0, Math.min(1, 1 - (delta - 50) / 950));
+            params[paramKey] = params[paramKey] * 0.5 + rate * 0.5; // Smooth
+        }
+        keyTimestamps[key] = now;
+    }
+
+    // Decay rates over time
+    setInterval(() => {
+        if(params.strobeRate > 0) params.strobeRate = Math.max(0, params.strobeRate - 0.05);
+        if(params.glitchIntens > 0.1) params.glitchIntens -= 0.01;
+    }, 100);
+
+    window.addEventListener('keydown', (e) => {
+        if (!isRunning) return;
+        switch(e.key) {
+            case '1': updateRate('1', 'hueSpeed'); break;
+            case '2': updateRate('2', 'strobeRate'); break;
+            case '3': updateRate('3', 'circleDensity'); break;
+            case '4': updateRate('4', 'arrowDensity'); break;
+            case '5': updateRate('5', 'bgDensity'); break;
+            case '6': updateRate('6', 'bgSpeed'); break;
+            case 'ArrowLeft': updateRate('ArrowLeft', 'glitchIntens'); break;
+            case 'ArrowRight': // BPM Tapper
+                const now = performance.now();
+                if (lastTapTime > 0 && (now - lastTapTime) < 2000) {
+                    bpmInterval = now - lastTapTime;
+                }
+                lastTapTime = now;
+                lastBeatTrigger = now; // Force beat sync
+                spawnEntities();
+                break;
+            case ' ': // Spacebar Morph
+                document.body.style.opacity = 0;
+                setTimeout(() => window.location.href = 'visual2.html', 2000);
+                break;
+        }
+    });
+
+    // --- AUDIO SETUP ---
+    async function initAudio() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const source = audioContext.createMediaStreamSource(stream);
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 256;
+            source.connect(analyser);
+            dataArray = new Uint8Array(analyser.frequencyBinCount);
+            
+            document.getElementById('start-screen').style.display = 'none';
+            isRunning = true;
+            requestAnimationFrame(render);
+        } catch (err) {
+            alert("Microphone access denied or unavailable. Visualizer needs audio.");
+        }
+    }
+    document.getElementById('start-screen').addEventListener('click', initAudio);
+
+    // --- WEBGL SHADER BACKGROUND ---
+    const glCanvas = document.getElementById('webgl-canvas');
+    const gl = glCanvas.getContext('webgl');
+
+    const vsSource = `
+        attribute vec2 position;
+        void main() { gl_Position = vec4(position, 0.0, 1.0); }
+    `;
+
+    const fsSource = `
+        precision highp float;
+        uniform vec2 u_resolution;
+        uniform float u_time;
+        uniform float u_audio;
+        uniform float u_hueSpeed;
+        uniform float u_density;
+        uniform float u_speed;
+        uniform float u_glitch;
+
+        // Hue shift function
+        vec3 hueShift(vec3 color, float hue) {
+            const vec3 k = vec3(0.57735, 0.57735, 0.57735);
+            float cosAngle = cos(hue);
+            return vec3(color * cosAngle + cross(k, color) * sin(hue) + k * dot(k, color) * (1.0 - cosAngle));
+        }
+
+        mat2 rot(float a) {
+            float s = sin(a), c = cos(a);
+            return mat2(c, -s, s, c);
+        }
+
+        // Industrial Box/Tunnel Distance Function
+        float map(vec3 p) {
+            vec3 q = p;
+            
+            // Forward movement mapped to speed param
+            q.z -= u_time * (1.0 + u_speed * 4.0);
+            
+            // Glitch distortion
+            q.x += sin(q.z * 2.0 + u_time) * u_glitch;
+            
+            // Modulo repetition for infinite tunnel based on density
+            float spacing = 2.0 - (u_density * 1.5); 
+            q.xy = mod(q.xy + spacing * 0.5, spacing) - spacing * 0.5;
+            q.xy *= rot(q.z * 0.1);
+            
+            // Box structure (industrial beams)
+            vec3 d = abs(q) - vec3(0.2 + u_audio * 0.3);
+            return min(max(d.x, max(d.y, d.z)), 0.0) + length(max(d, 0.0));
+        }
+
+        void main() {
+            vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / u_resolution.y;
+            
+            // Camera setup
+            vec3 ro = vec3(0.0, 0.0, -3.0);
+            vec3 rd = normalize(vec3(uv, 1.0));
+            
+            // Raymarching loop
+            float t = 0.0;
+            for(int i = 0; i < 64; i++) {
+                vec3 p = ro + rd * t;
+                float d = map(p);
+                if(d < 0.001 || t > 20.0) break;
+                t += d;
+            }
+            
+            // Coloring
+            vec3 col = vec3(0.0);
+            if(t < 20.0) {
+                float fog = exp(-0.1 * t);
+                // Base industrial color (dark metallic / toxic glow)
+                col = vec3(0.1, 0.15, 0.2) * fog;
+                // Audio reactive glow
+                col += vec3(0.5, 0.2, 0.8) * u_audio * fog * 2.0;
+            }
+            
+            col = hueShift(col, u_time * u_hueSpeed * 5.0);
+            
+            // Vignette
+            col *= 1.0 - dot(uv, uv) * 0.5;
+
+            gl_FragColor = vec4(col, 1.0);
+        }
+    `;
+
+    function compileShader(gl, source, type) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        return shader;
+    }
+
+    const program = gl.createProgram();
+    gl.attachShader(program, compileShader(gl, vsSource, gl.VERTEX_SHADER));
+    gl.attachShader(program, compileShader(gl, fsSource, gl.FRAGMENT_SHADER));
+    gl.linkProgram(program);
+    gl.useProgram(program);
+
+    const posBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+    const posLoc = gl.getAttribLocation(program, "position");
+    gl.enableVertexAttribArray(posLoc);
+    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+    const uniforms = {
+        res: gl.getUniformLocation(program, "u_resolution"),
+        time: gl.getUniformLocation(program, "u_time"),
+        audio: gl.getUniformLocation(program, "u_audio"),
+        hueSpeed: gl.getUniformLocation(program, "u_hueSpeed"),
+        density: gl.getUniformLocation(program, "u_density"),
+        speed: gl.getUniformLocation(program, "u_speed"),
+        glitch: gl.getUniformLocation(program, "u_glitch")
+    };
+
+    function resize() {
+        glCanvas.width = window.innerWidth;
+        glCanvas.height = window.innerHeight;
+        gl.viewport(0, 0, glCanvas.width, glCanvas.height);
+        
+        ctxCanvas.width = window.innerWidth;
+        ctxCanvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resize);
+    
+    // --- 2D FOREGROUND & ENTITIES ---
+    const ctxCanvas = document.getElementById('overlay-canvas');
+    const ctx = ctxCanvas.getContext('2d');
+    resize();
+
+    function drawArrow(x, y, size, angle) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        ctx.beginPath();
+        ctx.moveTo(0, -size);
+        ctx.lineTo(size/2, size/2);
+        ctx.lineTo(0, size/4);
+        ctx.lineTo(-size/2, size/2);
+        ctx.closePath();
+        ctx.fillStyle = '#000000';
+        ctx.fill();
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function spawnEntities() {
+        // Amount based on Key 3 (circleDensity)
+        let count = Math.floor(1 + params.circleDensity * 10);
+        for(let i=0; i<count; i++) {
+            activeEntities.push({
+                x: Math.random() * ctxCanvas.width,
+                y: Math.random() * ctxCanvas.height,
+                radius: 10 + Math.random() * 80 * audioEnergy,
+                color: colors[Math.floor(Math.random() * colors.length)],
+                life: 1.0,
+                hasArrow: Math.random() < params.arrowDensity, // Key 4
+                arrowAngle: angles[Math.floor(Math.random() * angles.length)]
+            });
+        }
+    }
+
+    // --- RENDER LOOP ---
+    function render(time) {
+        requestAnimationFrame(render);
+        
+        // Analyze Audio
+        analyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+        audioEnergy = sum / dataArray.length / 255;
+
+        // Auto Beat Sync / Tapper Sync
+        if (time - lastBeatTrigger > bpmInterval) {
+            // Trigger on energy spike or strict interval
+            if (audioEnergy > 0.4 || (time - lastTapTime > 0)) {
+                spawnEntities();
+                lastBeatTrigger = time;
+            }
+        }
+
+        // Render WebGL Background
+        gl.uniform2f(uniforms.res, glCanvas.width, glCanvas.height);
+        gl.uniform1f(uniforms.time, time * 0.001);
+        gl.uniform1f(uniforms.audio, audioEnergy);
+        gl.uniform1f(uniforms.hueSpeed, params.hueSpeed);
+        gl.uniform1f(uniforms.density, params.bgDensity);
+        gl.uniform1f(uniforms.speed, params.bgSpeed);
+        gl.uniform1f(uniforms.glitch, params.glitchIntens);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+        // Render 2D Foreground
+        ctx.clearRect(0, 0, ctxCanvas.width, ctxCanvas.height);
+        
+        for (let i = activeEntities.length - 1; i >= 0; i--) {
+            let e = activeEntities[i];
+            e.life -= 0.02 + (params.bgSpeed * 0.05); // Fade out
+            e.radius += 1.5; // Expand
+
+            if (e.life <= 0) {
+                activeEntities.splice(i, 1);
+                continue;
+            }
+
+            ctx.beginPath();
+            ctx.arc(e.x, e.y, e.radius, 0, Math.PI * 2);
+            ctx.fillStyle = e.color + Math.floor(e.life * 255).toString(16).padStart(2, '0');
+            ctx.fill();
+
+            if (e.hasArrow) {
+                // Arrow size correlates to circle
+                drawArrow(e.x, e.y, e.radius * 0.5, e.arrowAngle);
+            }
+        }
+
+        // Strobe Effect (Key 2)
+        const strobeLayer = document.getElementById('strobe-layer');
+        if (params.strobeRate > 0.05) {
+            // High strobe rate = fast flashes
+            let flash = Math.sin(time * params.strobeRate * 0.1) > 0 ? params.strobeRate : 0;
+            strobeLayer.style.opacity = flash * audioEnergy;
+        } else {
+            strobeLayer.style.opacity = 0;
+        }
+    }
+</script>
+</body>
+</html>
