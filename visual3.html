@@ -3,8 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Audioactive Visualizer - Organic Abyss</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <title>Audioactive Visualizer - The KIFS Matrix</title>
     <style>
         body, html {
             margin: 0;
@@ -12,7 +11,7 @@
             width: 100%;
             height: 100%;
             overflow: hidden;
-            background-color: #010101;
+            background-color: #000;
             font-family: 'Courier New', Courier, monospace;
         }
         canvas {
@@ -20,12 +19,16 @@
             position: absolute;
             top: 0;
             left: 0;
+            width: 100%;
+            height: 100%;
             z-index: 1;
         }
         body { transition: opacity 2s ease-in-out; }
     </style>
 </head>
 <body>
+
+<canvas id="webgl-canvas"></canvas>
 
 <script>
     // --- AUDIO & STATE ---
@@ -36,18 +39,17 @@
     
     let lastTapTime = 0;
     let bpmInterval = 500; 
-    let shockwaveRadius = 0;
-    let shockwaveActive = false;
+    let beatTrigger = 0;
 
-    // Advanced Rate of Change Engine
+    // Advanced Rate of Change Engine (Delta in ms)
     const keyState = {
-        '1': { lastPress: 0, delta: 3000 }, 
-        '2': { lastPress: 0, delta: 3000 }, 
-        '3': { lastPress: 0, delta: 3000 }, 
-        '4': { lastPress: 0, delta: 3000 }, 
-        '5': { lastPress: 0, delta: 3000 }, 
-        '6': { lastPress: 0, delta: 3000 }, 
-        'ArrowLeft': { lastPress: 0, delta: 3000 } 
+        '1': { lastPress: 0, delta: 3000 }, // Hue / Color Cycling Speed
+        '2': { lastPress: 0, delta: 3000 }, // Forward Velocity (Zoom)
+        '3': { lastPress: 0, delta: 3000 }, // Fractal Iteration Density
+        '4': { lastPress: 0, delta: 3000 }, // Audio Deformation (Fractal tearing)
+        '5': { lastPress: 0, delta: 3000 }, // Shadow / Void Depth (Fog)
+        '6': { lastPress: 0, delta: 3000 }, // Fractal Spin & Rotation
+        'ArrowLeft': { lastPress: 0, delta: 3000 } // Chromatic Glitch & Twist
     };
 
     // --- AUDIO INIT ---
@@ -59,12 +61,15 @@
             const source = audioContext.createMediaStreamSource(stream);
             analyser = audioContext.createAnalyser();
             analyser.fftSize = 512;
-            analyser.smoothingTimeConstant = 0.85; 
+            analyser.smoothingTimeConstant = 0.8; 
             source.connect(analyser);
             dataArray = new Uint8Array(analyser.frequencyBinCount);
             
             audioInitialized = true;
-            if (audioContext.state === 'running') isRunning = true;
+            if (audioContext.state === 'running') {
+                isRunning = true;
+                requestAnimationFrame(render);
+            }
         } catch (err) {
             console.warn("Microphone access pending or denied.", err);
         }
@@ -77,17 +82,17 @@
         const state = keyState[key];
         if (state.lastPress > 0) {
             let d = now - state.lastPress;
-            // Adjusted weighting: Reacts much faster to sudden changes in tapping speed
-            if (d < 4000) state.delta = (state.delta * 0.15) + (d * 0.85); 
+            // Hyper-responsive weighting for rapid visual changes
+            if (d < 4000) state.delta = (state.delta * 0.1) + (d * 0.9); 
         }
         state.lastPress = now;
     }
 
-    // Applying a slight power curve so extreme fast values trigger more aggressively
+    // Power curve mapping for extreme visual ranges
     function mapDelta(delta, fastVal, slowVal) {
-        let clamped = Math.max(50, Math.min(4000, delta));
-        let t = (clamped - 50) / (3950); 
-        t = Math.pow(t, 1.5); // Curves the response for more impact
+        let clamped = Math.max(50, Math.min(3000, delta));
+        let t = (clamped - 50) / (2950); 
+        t = Math.pow(t, 1.2); 
         return fastVal + t * (slowVal - fastVal);
     }
 
@@ -96,6 +101,7 @@
         if (audioContext && audioContext.state === 'suspended') {
             await audioContext.resume();
             isRunning = true;
+            requestAnimationFrame(render);
         }
 
         if (!isRunning) return;
@@ -108,176 +114,242 @@
                 bpmInterval = now - lastTapTime;
             }
             lastTapTime = now;
-            shockwaveRadius = 0; 
-            shockwaveActive = true;
+            beatTrigger = 1.0; // Flash intensity spike
         } else if (e.key === ' ') {
             document.body.style.opacity = 0;
             setTimeout(() => window.location.href = 'index.html', 2000);
         }
     });
 
-    // --- ORGANIC NOISE FUNCTION ---
-    function fbm(x, y, t, scale) {
-        let value = 0;
-        let amp = 1.0;
-        let freq = scale;
-        for (let i = 0; i < 3; i++) {
-            value += Math.sin(x * freq + t) * Math.cos(y * freq - t) * amp;
-            x += 1.5; y -= 1.5; 
-            amp *= 0.5;
-            freq *= 2.0;
-        }
-        return value;
-    }
+    // --- WEBGL FRACTAL SHADER ---
+    const glCanvas = document.getElementById('webgl-canvas');
+    const gl = glCanvas.getContext('webgl', { alpha: false, antialias: false });
 
-    // --- THREE.JS SETUP ---
-    const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x020204, 0.02);
-    
-    const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 250);
-    camera.position.set(0, 15, 40);
-    camera.lookAt(0, 0, 0);
+    const vsSource = `
+        attribute vec2 position;
+        void main() { gl_Position = vec4(position, 0.0, 1.0); }
+    `;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); 
-    document.body.appendChild(renderer.domElement);
-
-    const ambientLight = new THREE.AmbientLight(0x111122); 
-    scene.add(ambientLight);
-
-    const light1 = new THREE.PointLight(0xffb6c1, 4, 150); 
-    light1.position.set(-15, 15, 10);
-    scene.add(light1);
-    
-    const light2 = new THREE.PointLight(0xadd8e6, 4, 150); 
-    light2.position.set(15, 15, -10);
-    scene.add(light2);
-
-    const coreLight = new THREE.PointLight(0xffffff, 2, 100); 
-    coreLight.position.set(0, 10, 0);
-    scene.add(coreLight);
-
-    const planeSize = 140; // Extended slightly for wider camera pans
-    const planeResolution = 140; 
-    const planeGeo = new THREE.PlaneGeometry(planeSize, planeSize, planeResolution, planeResolution);
-    
-    planeGeo.rotateX(-Math.PI / 2);
-    
-    const planeMat = new THREE.MeshPhysicalMaterial({
-        color: 0x050508,
-        metalness: 0.9,
-        roughness: 0.1,
-        clearcoat: 1.0,
-        clearcoatRoughness: 0.05,
-        wireframe: false,
-        side: THREE.DoubleSide
-    });
-    
-    const fluidMesh = new THREE.Mesh(planeGeo, planeMat);
-    scene.add(fluidMesh);
-    
-    const positionAttribute = planeGeo.attributes.position;
-    const originalPositions = new Float32Array(positionAttribute.count * 3);
-    for (let i = 0; i < positionAttribute.count * 3; i++) {
-        originalPositions[i] = positionAttribute.array[i];
-    }
-
-    window.addEventListener('resize', () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-    });
-
-    // --- ANIMATION LOOP ---
-    const clock = new THREE.Clock();
-
-    function animate() {
-        requestAnimationFrame(animate);
+    const fsSource = `
+        precision highp float;
+        uniform vec2 u_resolution;
+        uniform float u_time;
+        uniform float u_audio;
+        uniform float u_beat;
         
-        if (!isRunning) {
-            renderer.render(scene, camera);
-            return;
+        // Dynamic Params
+        uniform float u_hueSpeed;
+        uniform float u_zoom;
+        uniform float u_density;
+        uniform float u_deform;
+        uniform float u_fog;
+        uniform float u_spin;
+        uniform float u_glitch;
+
+        mat2 rot(float a) {
+            float s = sin(a), c = cos(a);
+            return mat2(c, -s, s, c);
         }
 
-        const time = clock.getElapsedTime();
-
-        analyser.getByteFrequencyData(dataArray);
-        let sum = 0;
-        for (let j = 0; j < dataArray.length; j++) sum += dataArray[j];
-        let rawEnergy = sum / dataArray.length / 255;
-        smoothedEnergy = smoothedEnergy * 0.85 + rawEnergy * 0.15;
-
-        // --- MASSIVELY EXPANDED DYNAMIC PARAMETERS ---
-        // Fast values are much higher, slow values are almost zero
-        let dynHueSpeed  = mapDelta(keyState['1'].delta, 12.0, 0.05); // Rapid psychedelic vs glacial shift
-        let dynCamPan    = mapDelta(keyState['2'].delta, 80.0, 2.0);  // Extreme dizzying sweeps vs gentle sway
-        let dynViscosity = mapDelta(keyState['3'].delta, 0.8, 0.02);  // High frequency detailed flesh vs smooth rolling hills
-        let dynDeform    = mapDelta(keyState['4'].delta, 65.0, 1.0);  // Violent massive spikes vs tiny ripples
-        let dynFog       = mapDelta(keyState['5'].delta, 0.15, 0.005); // Pitch black claustrophobia vs vast clear cavern
-        let dynSpeed     = mapDelta(keyState['6'].delta, 15.0, 0.05); // Rushing violent rapids vs creeping sludge
-        let dynAgitation = mapDelta(keyState['ArrowLeft'].delta, 12.0, 0.0); // Intense shaking/glitch vs completely smooth
-
-        scene.fog.density = dynFog;
-        
-        const hue1 = (time * dynHueSpeed * 0.1) % 1;
-        const hue2 = (hue1 + 0.5) % 1;
-        light1.color.setHSL(hue1, 0.8, 0.5);
-        light2.color.setHSL(hue2, 0.8, 0.5);
-        
-        light1.intensity = 2 + (smoothedEnergy * 15);
-        light2.intensity = 2 + (smoothedEnergy * 15);
-        coreLight.intensity = (smoothedEnergy * 25);
-        
-        light1.position.x = Math.sin(time * 0.5 * dynSpeed) * 30;
-        light1.position.z = Math.cos(time * 0.5 * dynSpeed) * 30;
-        light2.position.x = Math.sin(time * -0.3 * dynSpeed) * 30;
-        light2.position.z = Math.cos(time * -0.3 * dynSpeed) * 30;
-
-        camera.position.x = Math.sin(time * 0.2) * dynCamPan;
-        camera.position.y = 12 + Math.cos(time * 0.3) * (dynCamPan * 0.4) - (smoothedEnergy * 8);
-        camera.position.z = 45 + Math.sin(time * 0.1) * (dynCamPan * 0.6);
-        camera.lookAt(0, 0, 0);
-
-        if (shockwaveActive) {
-            shockwaveRadius += 2.0 + (dynSpeed * 0.5);
-            if (shockwaveRadius > 150) shockwaveActive = false;
+        // Kaleidoscopic Distance Estimator
+        vec2 map(vec3 p) {
+            vec3 z = p;
+            
+            // Forward Motion
+            z.z -= u_time * u_zoom;
+            
+            // Spatial Twist (Glitch)
+            z.xy *= rot(z.z * u_glitch * 0.1 + sin(u_time) * u_glitch * 0.05);
+            
+            // Infinite Grid Repetition
+            float grid = 4.0 - (u_density * 2.0); // Density makes the space tighter
+            z = mod(z + grid/2.0, grid) - grid/2.0;
+            
+            float scale = 1.0;
+            float iterCount = 0.0;
+            
+            // The audio violently manipulates the folding angles
+            float foldAngle1 = u_time * u_spin + (u_audio * u_deform * 0.5);
+            float foldAngle2 = u_time * u_spin * 0.7 - (u_audio * u_deform * 0.3);
+            
+            for(int i = 0; i < 6; i++) {
+                // Folding space
+                z = abs(z) - vec3(0.5 + u_audio * u_deform * 0.2, 0.4, 0.3 + u_beat * 0.2);
+                
+                // Rotation
+                z.xy *= rot(foldAngle1 + float(i) * 0.2);
+                z.xz *= rot(foldAngle2);
+                
+                // Scaling
+                float k = 1.6 + (u_audio * 0.1 * u_deform);
+                z *= k;
+                scale *= k;
+                
+                iterCount += 1.0;
+            }
+            
+            // Box primitive forming the fractal structure
+            vec3 d = abs(z) - vec3(1.0);
+            float dist = (min(max(d.x, max(d.y, d.z)), 0.0) + length(max(d, 0.0))) / scale;
+            
+            return vec2(dist, iterCount); // Return distance and orbit trap for color
         }
 
-        const pos = fluidMesh.geometry.attributes.position;
-        
-        for (let i = 0; i < pos.count; i++) {
-            let x = originalPositions[i * 3];
-            let z = originalPositions[i * 3 + 2];
+        vec3 getNeonColor(vec3 p) {
+            // Morph between Soft Pink, Soft Blue, and White
+            float colorSeed = fract(p.x * 0.2 + p.z * 0.2 + u_time * u_hueSpeed);
             
-            let dist = Math.sqrt(x*x + z*z);
-            let fluidMotion = fbm(x, z, time * dynSpeed, dynViscosity);
-            
-            let freqIndex = Math.floor(dist * 1.5) % 128; 
-            let audioBoost = (dataArray[freqIndex] / 255.0);
-            
-            let jitter = (Math.random() - 0.5) * dynAgitation * audioBoost;
-            
-            // Scaled fluid motion slightly higher to match extreme bounds
-            let y = (fluidMotion * 6.0) + (audioBoost * dynDeform) + jitter;
+            if (colorSeed < 0.33) {
+                return vec3(1.0, 0.6, 0.75); // Soft Pink
+            } else if (colorSeed < 0.66) {
+                return vec3(0.5, 0.8, 1.0); // Soft Blue
+            } else {
+                return vec3(0.9, 0.9, 1.0); // Soft White
+            }
+        }
 
-            if (shockwaveActive) {
-                let waveDist = Math.abs(dist - shockwaveRadius);
-                if (waveDist < 8) {
-                    y += Math.sin((1 - waveDist/8) * Math.PI) * 15;
+        void main() {
+            vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / u_resolution.y;
+            
+            // Chromatic Aberration base
+            float split = u_glitch * (0.005 + u_audio * 0.02);
+            
+            vec3 ro = vec3(0.0, 0.0, -2.5); // Camera origin
+            
+            vec3 col = vec3(0.0);
+            
+            // Render Pass (incorporating RGB split for heavy glitch effect)
+            for (int c = 0; c < 3; c++) {
+                vec2 suv = uv;
+                if (c == 0) suv.x -= split; // Red channel shift
+                if (c == 2) suv.x += split; // Blue channel shift
+                
+                vec3 rd = normalize(vec3(suv, 1.0));
+                
+                float t = 0.0;
+                float accumulatedGlow = 0.0;
+                vec2 res;
+                vec3 p;
+                
+                // Raymarching Loop
+                for(int i = 0; i < 70; i++) {
+                    p = ro + rd * t;
+                    res = map(p);
+                    
+                    if(res.x < 0.001 || t > 12.0) break;
+                    
+                    // Volumetric Glow accumulation based on proximity to surfaces
+                    accumulatedGlow += (0.015 / (0.01 + res.x * res.x)) * (1.0 + u_audio * 2.0);
+                    
+                    t += res.x * 0.8; // Step size (slightly reduced to avoid missing fine details)
+                }
+                
+                if(t < 12.0) {
+                    float fog = exp(-u_fog * t * t); // Deep industrial fog
+                    
+                    vec3 neon = getNeonColor(p);
+                    
+                    // The structure itself is dark/metallic, the glow provides the light
+                    float structLight = max(0.0, 1.0 - res.y * 0.1);
+                    vec3 baseCol = vec3(0.05) * structLight;
+                    
+                    baseCol += neon * accumulatedGlow * 0.05;
+                    baseCol += neon * u_beat * 0.5; // Flash on beat
+                    
+                    if (c == 0) col.r = (baseCol * fog).r;
+                    else if (c == 1) col.g = (baseCol * fog).g;
+                    else col.b = (baseCol * fog).b;
                 }
             }
-
-            pos.setY(i, y);
+            
+            // Heavy Vignette for basement projector feel
+            col *= 1.0 - dot(uv, uv) * 0.7;
+            
+            gl_FragColor = vec4(col, 1.0);
         }
+    `;
 
-        pos.needsUpdate = true;
-        fluidMesh.geometry.computeVertexNormals();
-
-        renderer.render(scene, camera);
+    function compileShader(gl, source, type) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        return shader;
     }
 
-    animate();
+    const program = gl.createProgram();
+    gl.attachShader(program, compileShader(gl, vsSource, gl.VERTEX_SHADER));
+    gl.attachShader(program, compileShader(gl, fsSource, gl.FRAGMENT_SHADER));
+    gl.linkProgram(program);
+    gl.useProgram(program);
+
+    const posBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+    const posLoc = gl.getAttribLocation(program, "position");
+    gl.enableVertexAttribArray(posLoc);
+    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+    const uniforms = {
+        res: gl.getUniformLocation(program, "u_resolution"),
+        time: gl.getUniformLocation(program, "u_time"),
+        audio: gl.getUniformLocation(program, "u_audio"),
+        beat: gl.getUniformLocation(program, "u_beat"),
+        hueSpeed: gl.getUniformLocation(program, "u_hueSpeed"),
+        zoom: gl.getUniformLocation(program, "u_zoom"),
+        density: gl.getUniformLocation(program, "u_density"),
+        deform: gl.getUniformLocation(program, "u_deform"),
+        fog: gl.getUniformLocation(program, "u_fog"),
+        spin: gl.getUniformLocation(program, "u_spin"),
+        glitch: gl.getUniformLocation(program, "u_glitch")
+    };
+
+    function resize() {
+        glCanvas.width = window.innerWidth;
+        glCanvas.height = window.innerHeight;
+        gl.viewport(0, 0, glCanvas.width, glCanvas.height);
+    }
+    window.addEventListener('resize', resize);
+    resize();
+    
+    // --- RENDER LOOP ---
+    function render(time) {
+        if (!isRunning) return;
+        requestAnimationFrame(render);
+        
+        analyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+        let rawEnergy = sum / dataArray.length / 255;
+        smoothedEnergy = smoothedEnergy * 0.8 + rawEnergy * 0.2;
+
+        // Auto Beat Detection fallback
+        if (beatTrigger > 0) beatTrigger -= 0.05;
+        if (rawEnergy > 0.6 && beatTrigger <= 0) beatTrigger = 1.0;
+
+        // Extreme bounds mapping based on key deltas
+        let dynHueSpeed = mapDelta(keyState['1'].delta, 3.0, 0.05);   // Fast flash vs glacial morph
+        let dynZoom     = mapDelta(keyState['2'].delta, 10.0, 0.5);   // Hyperdrive vs floating
+        let dynDensity  = mapDelta(keyState['3'].delta, 1.5, 0.0);    // Dense claustrophobia vs vast open voids
+        let dynDeform   = mapDelta(keyState['4'].delta, 5.0, 0.0);    // Violent ripping vs rigid structure
+        let dynFog      = mapDelta(keyState['5'].delta, 0.2, 0.02);   // Pitch black vs full visibility
+        let dynSpin     = mapDelta(keyState['6'].delta, 2.5, 0.05);   // Dizzying rotation vs subtle turning
+        let dynGlitch   = mapDelta(keyState['ArrowLeft'].delta, 3.0, 0.0); // Heavy Chromatic tear vs pristine lens
+
+        gl.uniform2f(uniforms.res, glCanvas.width, glCanvas.height);
+        gl.uniform1f(uniforms.time, time * 0.001);
+        gl.uniform1f(uniforms.audio, smoothedEnergy);
+        gl.uniform1f(uniforms.beat, Math.max(0, beatTrigger));
+        
+        gl.uniform1f(uniforms.hueSpeed, dynHueSpeed);
+        gl.uniform1f(uniforms.zoom, dynZoom);
+        gl.uniform1f(uniforms.density, dynDensity);
+        gl.uniform1f(uniforms.deform, dynDeform);
+        gl.uniform1f(uniforms.fog, dynFog);
+        gl.uniform1f(uniforms.spin, dynSpin);
+        gl.uniform1f(uniforms.glitch, dynGlitch);
+        
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
 </script>
 </body>
 </html>
