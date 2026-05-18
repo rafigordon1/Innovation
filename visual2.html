@@ -23,34 +23,17 @@
             left: 0;
             z-index: 1;
         }
-        #start-screen {
-            position: absolute;
-            z-index: 10;
-            color: rgba(255, 255, 255, 0.8);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            width: 100%;
-            height: 100%;
-            background: #020202;
-            cursor: pointer;
-            font-size: 18px;
-            letter-spacing: 4px;
-            text-transform: uppercase;
-            transition: opacity 1.5s ease-in-out;
-        }
         body { transition: opacity 2s ease-in-out; }
     </style>
 </head>
 <body>
-
-<div id="start-screen">[ INIT P5.JS AUDIO NEXUS ]</div>
 
 <script>
     // --- AUDIO & STATE ---
     let audioContext, analyser, dataArray;
     let smoothedEnergy = 0;
     let isRunning = false;
+    let audioInitialized = false;
     
     // BPM / Shockwave state
     let lastTapTime = 0;
@@ -68,7 +51,34 @@
         'ArrowLeft': { lastPress: 0, delta: 3000 } // Axis Twist / Chaos
     };
 
-    // --- INPUT LOGIC ---
+    // --- AUDIO INIT ---
+    async function initAudio() {
+        if (audioInitialized) return;
+        try {
+            // Because permissions were granted on index.html, this usually passes without a popup
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const source = audioContext.createMediaStreamSource(stream);
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 512;
+            analyser.smoothingTimeConstant = 0.85; 
+            source.connect(analyser);
+            dataArray = new Uint8Array(analyser.frequencyBinCount);
+            
+            audioInitialized = true;
+            // If the browser hasn't suspended the context, we can run immediately
+            if (audioContext.state === 'running') {
+                isRunning = true;
+            }
+        } catch (err) {
+            console.warn("Microphone access pending or denied.", err);
+        }
+    }
+
+    // Attempt auto-initialization immediately on load
+    window.addEventListener('load', initAudio);
+
+    // --- INPUT LOGIC & FALLBACK INIT ---
     function updateRate(key) {
         const now = performance.now();
         const state = keyState[key];
@@ -87,8 +97,19 @@
         return fastVal + t * (slowVal - fastVal);
     }
 
-    window.addEventListener('keydown', (e) => {
+    window.addEventListener('keydown', async (e) => {
+        // FALLBACK: If audio isn't initialized or is suspended, ANY keypress fixes it
+        if (!audioInitialized) {
+            await initAudio();
+        }
+        if (audioContext && audioContext.state === 'suspended') {
+            await audioContext.resume();
+            isRunning = true;
+        }
+
         if (!isRunning) return;
+
+        // Normal Key Logic
         if (keyState[e.key] !== undefined) {
             updateRate(e.key);
         } else if (e.key === 'ArrowRight') {
@@ -105,37 +126,12 @@
         }
     });
 
-    // --- AUDIO INIT ---
-    async function initAudio() {
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            const source = audioContext.createMediaStreamSource(stream);
-            analyser = audioContext.createAnalyser();
-            analyser.fftSize = 512;
-            analyser.smoothingTimeConstant = 0.85; 
-            source.connect(analyser);
-            dataArray = new Uint8Array(analyser.frequencyBinCount);
-            
-            const screen = document.getElementById('start-screen');
-            screen.style.opacity = 0;
-            setTimeout(() => screen.style.display = 'none', 1500);
-            
-            isRunning = true;
-        } catch (err) {
-            alert("Microphone access required for audio reactivity.");
-        }
-    }
-    document.getElementById('start-screen').addEventListener('click', initAudio);
-
     // --- P5.JS SKETCH ---
     
     function setup() {
-        // preserveDrawingBuffer is CRITICAL for the Butterchurn feedback/trail effect in WebGL
         let canvas = createCanvas(windowWidth, windowHeight, WEBGL);
         setAttributes('preserveDrawingBuffer', true);
         
-        // Use HSB for deep, rich, easily morphable rave colors
         colorMode(HSB, 360, 100, 100, 1.0);
         background(0);
         noStroke();
@@ -147,31 +143,29 @@
     }
 
     function draw() {
+        // If not running, keep the screen black but ready
         if (!isRunning) return;
 
-        // Process Audio
         analyser.getByteFrequencyData(dataArray);
         let sum = 0;
         for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
         let rawEnergy = sum / dataArray.length / 255;
-        smoothedEnergy = smoothedEnergy * 0.8 + rawEnergy * 0.2; // Silky smooth reactivity
+        smoothedEnergy = smoothedEnergy * 0.8 + rawEnergy * 0.2; 
 
         // --- MAP DYNAMIC PARAMETERS ---
         let dynHueSpeed  = mapDelta(keyState['1'].delta, 5.0, 0.2);
         let dynCamBreath = mapDelta(keyState['2'].delta, 400, 20); 
         let dynDensity   = Math.floor(mapDelta(keyState['3'].delta, 128, 16)); 
         let dynDeform    = mapDelta(keyState['4'].delta, 400, 50); 
-        let dynTrails    = mapDelta(keyState['5'].delta, 0.05, 0.4); // Alpha for clearing (lower = longer trails)
+        let dynTrails    = mapDelta(keyState['5'].delta, 0.05, 0.4); 
         let dynSpeed     = mapDelta(keyState['6'].delta, 0.02, 0.002);
         let dynTwist     = mapDelta(keyState['ArrowLeft'].delta, 2.0, 0.05);
 
         // --- 1. FEEDBACK LAYER (TRAILS) ---
-        // Instead of clearing the background, we draw a massive semi-transparent black plane.
-        // This creates the infinite zoom/trail "Butterchurn" effect.
         blendMode(BLEND);
         push();
         translate(0, 0, -1000); 
-        fill(0, 0, 0, dynTrails); // Key 5 controls how quickly trails fade
+        fill(0, 0, 0, dynTrails); 
         plane(width * 10, height * 10);
         pop();
 
@@ -181,47 +175,38 @@
         // --- 2. CAMERA & ENVIRONMENT ---
         let time = millis();
         
-        // Smooth Camera Breath mapped to Key 2 (replaces strobe)
         let zOffset = sin(time * 0.001 * dynCamBreath * 0.01) * dynCamBreath;
         translate(0, 0, zOffset);
         
-        // Global Rotation mapped to Key 6
         rotateX(time * dynSpeed);
         rotateY(time * dynSpeed * 0.8);
         rotateZ(time * dynSpeed * 0.5);
 
-        // Decay shockwave
         if (shockwaveRadius > 0) {
             shockwaveRadius -= 0.02;
             if (shockwaveRadius < 0) shockwaveRadius = 0;
         }
 
         // --- 3. RENDER THE AUDIO NEXUS ---
-        // We draw interconnected rings based on the FFT data.
         let baseHue = (time * 0.01 * dynHueSpeed) % 360;
-        let step = Math.max(1, Math.floor(256 / dynDensity)); // Key 3 controls complexity
+        let step = Math.max(1, Math.floor(256 / dynDensity)); 
         
         for (let i = 0; i < 256; i += step) {
-            let audioVal = dataArray[i] / 255.0; // 0.0 to 1.0
-            let r = 100 + (audioVal * dynDeform) + (shockwaveRadius * 300); // Key 4 controls extension
+            let audioVal = dataArray[i] / 255.0; 
+            let r = 100 + (audioVal * dynDeform) + (shockwaveRadius * 300); 
             
             push();
             
-            // Twist the axes based on Key Left (creates chaotic or uniform structures)
             rotateX((i * dynTwist) + (time * 0.0001));
             rotateY((i * dynTwist * 1.2));
             
-            // Calculate rich color for this specific ring
             let currentHue = (baseHue + i * 0.5) % 360;
-            // Higher audio = brighter and more saturated
             stroke(currentHue, 80 + audioVal * 20, 10 + audioVal * 90, 0.4); 
             strokeWeight(1.5 + audioVal * 3);
             noFill();
             
-            // Draw the primary organic ring
             beginShape();
             for (let angle = 0; angle < TWO_PI; angle += PI/16) {
-                // Modulate the ring itself slightly with audio
                 let wave = sin(angle * 4 + time * 0.005) * (audioVal * 50);
                 let x = cos(angle) * (r + wave);
                 let y = sin(angle) * (r + wave);
@@ -229,22 +214,16 @@
             }
             endShape(CLOSE);
 
-            // Draw the Fine Vectors (Arrows shooting outward)
-            // We only draw them on a subset of nodes to keep it elegant
             if (i % (step * 2) === 0) {
-                stroke(255, 0, 100, 0.6); // Sharp white/bright flash
+                stroke(255, 0, 100, 0.6); 
                 strokeWeight(1);
                 
-                // Vector length based on bass/audio
                 let vecLen = r + 50 + (audioVal * 200);
                 
-                // Draw line pointing strictly outwards
                 line(r, 0, 0, vecLen, 0, 0);
                 
-                // Minimalist Arrowhead at the tip
                 push();
                 translate(vecLen, 0, 0);
-                // Simple V shape for the fine arrow
                 line(0, 0, 0, -10, -5, 0);
                 line(0, 0, 0, -10, 5, 0);
                 pop();
