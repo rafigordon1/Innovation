@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audioactive Visualizer - Monolith Grid</title>
+    <!-- Import Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #020202;
+            font-family: 'Courier New', Courier, monospace;
+        }
+        canvas {
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+        body { transition: opacity 2s ease-in-out; }
+    </style>
+</head>
+<body>
+
+<script>
+    // --- AUDIO & STATE ---
+    let audioContext, analyser, dataArray;
+    let smoothedEnergy = 0;
+    let isRunning = false;
+    let audioInitialized = false;
+    
+    // BPM / Shockwave state
+    let lastTapTime = 0;
+    let bpmInterval = 500; 
+    let shockwaveRadius = 0;
+    let shockwaveActive = false;
+
+    // Advanced Rate of Change Engine (Delta in ms)
+    const keyState = {
+        '1': { lastPress: 0, delta: 3000 }, // Hue Shift Speed
+        '2': { lastPress: 0, delta: 3000 }, // Camera Pan/Sway
+        '3': { lastPress: 0, delta: 3000 }, // Grid Chaos/Noise
+        '4': { lastPress: 0, delta: 3000 }, // Audio Pillar Deformation
+        '5': { lastPress: 0, delta: 3000 }, // Fog Density (Basement Depth)
+        '6': { lastPress: 0, delta: 3000 }, // Flyover Speed
+        'ArrowLeft': { lastPress: 0, delta: 3000 } // Broken Fluorescent Flicker
+    };
+
+    // --- AUDIO INIT ---
+    async function initAudio() {
+        if (audioInitialized) return;
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const source = audioContext.createMediaStreamSource(stream);
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 256;
+            analyser.smoothingTimeConstant = 0.8; 
+            source.connect(analyser);
+            dataArray = new Uint8Array(analyser.frequencyBinCount);
+            
+            audioInitialized = true;
+            if (audioContext.state === 'running') isRunning = true;
+        } catch (err) {
+            console.warn("Microphone access pending or denied.", err);
+        }
+    }
+    window.addEventListener('load', initAudio);
+
+    // --- INPUT LOGIC ---
+    function updateRate(key) {
+        const now = performance.now();
+        const state = keyState[key];
+        if (state.lastPress > 0) {
+            let d = now - state.lastPress;
+            if (d < 4000) state.delta = (state.delta * 0.3) + (d * 0.7); 
+        }
+        state.lastPress = now;
+    }
+
+    function mapDelta(delta, fastVal, slowVal) {
+        let clamped = Math.max(50, Math.min(4000, delta));
+        let t = (clamped - 50) / (4000 - 50); 
+        return fastVal + t * (slowVal - fastVal);
+    }
+
+    window.addEventListener('keydown', async (e) => {
+        if (!audioInitialized) await initAudio();
+        if (audioContext && audioContext.state === 'suspended') {
+            await audioContext.resume();
+            isRunning = true;
+        }
+
+        if (!isRunning) return;
+
+        if (keyState[e.key] !== undefined) {
+            updateRate(e.key);
+        } else if (e.key === 'ArrowRight') {
+            const now = performance.now();
+            if (lastTapTime > 0 && (now - lastTapTime) < 2000) {
+                bpmInterval = now - lastTapTime;
+            }
+            lastTapTime = now;
+            shockwaveRadius = 0; 
+            shockwaveActive = true;
+        } else if (e.key === ' ') {
+            document.body.style.opacity = 0;
+            setTimeout(() => window.location.href = 'index.html', 2000);
+        }
+    });
+
+    // --- THREE.JS SETUP ---
+    const scene = new THREE.Scene();
+    
+    // Deep industrial fog
+    scene.fog = new THREE.FogExp2(0x050508, 0.03);
+    
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 15, 30);
+    camera.lookAt(0, 0, 0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    document.body.appendChild(renderer.domElement);
+
+    // --- LIGHTING ---
+    const ambientLight = new THREE.AmbientLight(0x222233); // Dim basement light
+    scene.add(ambientLight);
+
+    const mainLight = new THREE.PointLight(0xffffff, 2, 100);
+    mainLight.position.set(0, 20, 0);
+    scene.add(mainLight);
+    
+    const coreLight = new THREE.PointLight(0xffb6c1, 5, 50); // Soft pink center pulse
+    coreLight.position.set(0, 5, 0);
+    scene.add(coreLight);
+
+    // --- MONOLITH GRID (InstancedMesh) ---
+    const gridSize = 40; 
+    const spacing = 1.5;
+    const instanceCount = gridSize * gridSize;
+    
+    const boxGeo = new THREE.BoxGeometry(1.2, 1, 1.2);
+    const boxMat = new THREE.MeshStandardMaterial({
+        color: 0x111111,
+        metalness: 0.9,
+        roughness: 0.2,
+    });
+    
+    const instancedMesh = new THREE.InstancedMesh(boxGeo, boxMat, instanceCount);
+    scene.add(instancedMesh);
+    
+    const dummy = new THREE.Object3D();
+    
+    // Pre-calculate grid positions to save CPU in the render loop
+    const gridData = [];
+    let i = 0;
+    for (let x = 0; x < gridSize; x++) {
+        for (let z = 0; z < gridSize; z++) {
+            let posX = (x - gridSize / 2) * spacing;
+            let posZ = (z - gridSize / 2) * spacing;
+            let distToCenter = Math.sqrt(posX*posX + posZ*posZ);
+            
+            gridData.push({ x: posX, z: posZ, dist: distToCenter });
+            
+            dummy.position.set(posX, 0, posZ);
+            dummy.updateMatrix();
+            instancedMesh.setMatrixAt(i, dummy.matrix);
+            i++;
+        }
+    }
+    instancedMesh.instanceMatrix.needsUpdate = true;
+
+    // --- OVERHEAD ARCHITECTURE (Fine Vectors & Rings) ---
+    const archGroup = new THREE.Group();
+    scene.add(archGroup);
+    
+    // Neon Ring
+    const ringGeo = new THREE.TorusGeometry(12, 0.1, 16, 100);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0xadd8e6, transparent: true, opacity: 0.8 }); // Soft Blue
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 15;
+    archGroup.add(ring);
+
+    // Fine Vectors (The sharp geometric lines requested)
+    const lineGeo = new THREE.IcosahedronGeometry(15, 1);
+    const edges = new THREE.EdgesGeometry(lineGeo);
+    const lineMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.3 }); // White
+    const wireframe = new THREE.LineSegments(edges, lineMat);
+    wireframe.position.y = 15;
+    archGroup.add(wireframe);
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // --- ANIMATION LOOP ---
+    const clock = new THREE.Clock();
+
+    function animate() {
+        requestAnimationFrame(animate);
+        
+        if (!isRunning) {
+            renderer.render(scene, camera);
+            return;
+        }
+
+        const time = clock.getElapsedTime();
+
+        // Audio Analysis
+        analyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let j = 0; j < dataArray.length; j++) sum += dataArray[j];
+        let rawEnergy = sum / dataArray.length / 255;
+        smoothedEnergy = smoothedEnergy * 0.85 + rawEnergy * 0.15;
+
+        // Dynamic Mappings from Key Delta Engine
+        let dynHueSpeed = mapDelta(keyState['1'].delta, 2.0, 0.1);
+        let dynCamPan   = mapDelta(keyState['2'].delta, 20.0, 2.0); 
+        let dynChaos    = mapDelta(keyState['3'].delta, 5.0, 0.5); 
+        let dynDeform   = mapDelta(keyState['4'].delta, 15.0, 2.0); 
+        let dynFog      = mapDelta(keyState['5'].delta, 0.08, 0.015); 
+        let dynSpeed    = mapDelta(keyState['6'].delta, 10.0, 1.0);
+        let dynFlicker  = mapDelta(keyState['ArrowLeft'].delta, 1.0, 0.0);
+
+        // Update Environment
+        scene.fog.density = dynFog;
+        
+        // Colors (Soft pink to soft blue shift)
+        const hue = (time * dynHueSpeed) % 1;
+        coreLight.color.setHSL(hue, 0.6, 0.6);
+        
+        // Flicker effect (simulating broken warehouse lights)
+        if (dynFlicker > 0.1 && Math.random() < dynFlicker * 0.2) {
+            mainLight.intensity = 0;
+        } else {
+            mainLight.intensity = 2 + smoothedEnergy * 3;
+        }
+        coreLight.intensity = 5 + (smoothedEnergy * 10);
+
+        // Camera Sway
+        camera.position.x = Math.sin(time * 0.5) * dynCamPan;
+        camera.position.z = 25 + Math.cos(time * 0.3) * (dynCamPan * 0.5);
+        camera.lookAt(0, 10, 0);
+
+        // Shockwave Logic
+        if (shockwaveActive) {
+            shockwaveRadius += 1.5;
+            if (shockwaveRadius > 60) shockwaveActive = false;
+        }
+
+        // --- UPDATE GRID ---
+        let idx = 0;
+        for (let x = 0; x < gridSize; x++) {
+            for (let z = 0; z < gridSize; z++) {
+                const data = gridData[idx];
+                
+                // Simulate forward flying by shifting the wave phase
+                let wavePhaseX = data.x + time * dynSpeed;
+                let wavePhaseZ = data.z + time * dynSpeed * 0.5;
+                
+                // Base noise/chaos
+                let noise = Math.sin(wavePhaseX * 0.5) * Math.cos(wavePhaseZ * 0.5) * dynChaos;
+                
+                // Audio Mapping: Map distance from center to frequency bin
+                // Center gets bass (low indices), edges get treble (high indices)
+                let freqIndex = Math.floor(Math.min(data.dist, 64)); 
+                let audioBoost = (dataArray[freqIndex] / 255.0);
+                
+                let height = 0.5 + Math.max(0, noise) + (audioBoost * dynDeform);
+
+                // Apply Shockwave
+                if (shockwaveActive) {
+                    let distToWave = Math.abs(data.dist - shockwaveRadius);
+                    if (distToWave < 3) {
+                        height += (3 - distToWave) * 5; // Violent spike
+                    }
+                }
+
+                dummy.position.set(data.x, height / 2, data.z);
+                dummy.scale.set(1, height, 1);
+                dummy.updateMatrix();
+                instancedMesh.setMatrixAt(idx, dummy.matrix);
+                idx++;
+            }
+        }
+        instancedMesh.instanceMatrix.needsUpdate = true;
+
+        // --- UPDATE ARCHITECTURE ---
+        archGroup.rotation.y = time * 0.2;
+        archGroup.rotation.z = Math.sin(time * 0.5) * 0.1;
+        
+        // Wireframe reacts to treble (higher frequency average)
+        let trebleSum = 0;
+        for (let j = 128; j < 256; j++) trebleSum += dataArray[j];
+        let treble = trebleSum / 128 / 255;
+        
+        let targetScale = 1 + treble * 0.5;
+        wireframe.scale.set(targetScale, targetScale, targetScale);
+        
+        // Ring pulses with bass
+        ring.scale.set(1 + smoothedEnergy * 0.3, 1 + smoothedEnergy * 0.3, 1);
+        ringMat.opacity = 0.3 + (smoothedEnergy * 0.7);
+
+        renderer.render(scene, camera);
+    }
+
+    animate();
+</script>
+</body>
+</html>
