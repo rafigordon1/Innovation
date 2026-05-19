@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Audioactive Visualizer - Plasma Containment Core</title>
+    <title>Audioactive Visualizer - Bioluminescent Heart</title>
     <!-- Import Three.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
@@ -13,7 +13,7 @@
             width: 100%;
             height: 100%;
             overflow: hidden;
-            background-color: #010102;
+            background-color: #010101;
             font-family: 'Courier New', Courier, monospace;
             cursor: pointer;
         }
@@ -44,7 +44,7 @@
 </head>
 <body>
 
-<div id="init-overlay">[ CLICK ANYWHERE TO IGNITE CONTAINMENT CORE ]</div>
+<div id="init-overlay">[ CLICK ANYWHERE TO AWAKEN THE CORE ]</div>
 
 <script>
     // --- AUDIO & STATE ---
@@ -52,16 +52,13 @@
     let isRunning = false;
     let audioInitialized = false;
 
-    // GPU Audio Texture Data
     let audioTexture;
     let audioData = new Uint8Array(256);
 
-    // Audio Envelopes (Ensures buttery smooth, jitter-free reactions)
+    // Audio Envelopes (Fast attack for punchy reactivity, slow release for organic fluidity)
     let envBass = 0, envMids = 0, envTreble = 0;
-    
-    // Attack/Release parameters for liquid momentum
-    const ATTACK = 0.2; 
-    const RELEASE = 0.03; 
+    const ATTACK = 0.35;  // Faster attack = more sensitive and punchy
+    const RELEASE = 0.04; // Smooth release = feels like liquid settling
 
     function smoothAudio(current, target) {
         return (target > current) 
@@ -82,7 +79,7 @@
             analyser = audioContext.createAnalyser();
             
             analyser.fftSize = 512;
-            analyser.smoothingTimeConstant = 0.65; // Highly responsive base signal
+            analyser.smoothingTimeConstant = 0.6; // Low smoothing for raw, aggressive reactivity
             
             source.connect(analyser);
             dataArray = new Uint8Array(analyser.frequencyBinCount);
@@ -115,7 +112,7 @@
 
     // --- THREE.JS SETUP ---
     const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x010102, 0.008); 
+    scene.fog = new THREE.FogExp2(0x010101, 0.008); 
     
     const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500);
     camera.position.set(0, 0, 70); 
@@ -123,17 +120,17 @@
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setClearColor(0x010102, 1);
+    renderer.setClearColor(0x010101, 1);
     document.body.appendChild(renderer.domElement);
 
-    // --- AUDIO TEXTURE FOR SHADER ---
+    // --- AUDIO TEXTURE ---
     audioTexture = new THREE.DataTexture(audioData, 256, 1, THREE.LuminanceFormat, THREE.UnsignedByteType);
     audioTexture.magFilter = THREE.LinearFilter; 
     audioTexture.minFilter = THREE.LinearFilter;
 
-    // --- 1. THE PLASMA COIL (Torus Knot) ---
-    // High poly count to allow for smooth ferrofluid-like audio spikes
-    const coreGeo = new THREE.TorusKnotGeometry(16, 4.5, 400, 80);
+    // --- 1. THE ORGANIC LIQUID HEART ---
+    // A thick torus knot to act as our fleshy base
+    const coreGeo = new THREE.TorusKnotGeometry(12, 6, 512, 128);
 
     const coreUniforms = {
         uTime: { value: 0 },
@@ -146,7 +143,6 @@
     const coreMaterial = new THREE.ShaderMaterial({
         uniforms: coreUniforms,
         transparent: true,
-        depthWrite: true,
         vertexShader: `
             uniform float uTime;
             uniform sampler2D uAudioTex;
@@ -155,99 +151,126 @@
 
             varying vec2 vUv;
             varying float vAudioVal;
-            varying vec3 vPos;
+            varying vec3 vNormal;
+            varying vec3 vWorldPos;
+
+            // 3D Simplex-like Noise function for organic boiling tissue
+            vec3 hash(vec3 p) {
+                p = vec3(dot(p, vec3(127.1, 311.7, 74.7)),
+                         dot(p, vec3(269.5, 183.3, 246.1)),
+                         dot(p, vec3(113.5, 271.9, 124.6)));
+                return -1.0 + 2.0 * fract(sin(p) * 43758.5453123);
+            }
+
+            float noise(vec3 p) {
+                vec3 i = floor(p);
+                vec3 f = fract(p);
+                vec3 u = f * f * (3.0 - 2.0 * f);
+                return mix(mix(mix(dot(hash(i + vec3(0.0,0.0,0.0)), f - vec3(0.0,0.0,0.0)), 
+                                   dot(hash(i + vec3(1.0,0.0,0.0)), f - vec3(1.0,0.0,0.0)), u.x),
+                               mix(dot(hash(i + vec3(0.0,1.0,0.0)), f - vec3(0.0,1.0,0.0)), 
+                                   dot(hash(i + vec3(1.0,1.0,0.0)), f - vec3(1.0,1.0,0.0)), u.x), u.y),
+                           mix(mix(dot(hash(i + vec3(0.0,0.0,1.0)), f - vec3(0.0,0.0,1.0)), 
+                                   dot(hash(i + vec3(1.0,0.0,1.0)), f - vec3(1.0,0.0,1.0)), u.x),
+                               mix(dot(hash(i + vec3(0.0,1.0,1.0)), f - vec3(0.0,1.0,1.0)), 
+                                   dot(hash(i + vec3(1.0,1.0,1.0)), f - vec3(1.0,1.0,1.0)), u.x), u.y), u.z);
+            }
 
             void main() {
                 vUv = uv;
 
-                // Map audio along the length of the knot (uv.x)
-                // We wrap it smoothly to prevent a seam
-                float freq = abs(fract(uv.x * 6.0) - 0.5) * 2.0; 
+                // Read audio mapped to the geometry length
+                float freq = abs(fract(uv.x * 4.0) - 0.5) * 2.0; 
                 float audioVal = texture2D(uAudioTex, vec2(freq, 0.5)).r;
                 vAudioVal = audioVal;
 
                 vec3 pos = position;
 
-                // Ferrofluid audio spikes!
-                // Only frequencies hitting hard enough push the geometry out
-                float spike = smoothstep(0.5, 1.0, audioVal);
+                // Organic Displacement (Liquid/Flesh deformation)
+                // The geometry boils and writhes based on Mids and Time
+                float noiseFreq = 0.15 + (uMids * 0.1);
+                float n = noise(pos * noiseFreq + (uTime * 0.5));
                 
-                // Add a dynamic ripple so the spikes aren't totally uniform
-                float ripple = sin(uv.y * 30.0 + uTime * 10.0) * 0.5 + 0.5;
+                // Add secondary high-frequency noise for cymatic audio ripples
+                float n2 = noise(pos * 0.5 - (uTime * 1.5));
                 
-                // Extrude vertices along their normal based on the music
-                pos += normal * (spike * uMids * 12.0 * ripple);
+                // Displace vertices along their normals
+                // Bass drives the macro shape, Mids drive the boiling, AudioVal drives local spikes
+                float displacement = (n * 8.0 * (1.0 + uMids * 2.0)) + 
+                                     (n2 * 2.0 * audioVal) + 
+                                     (audioVal * uBass * 8.0);
+                                     
+                pos += normal * displacement;
 
-                // Overall breathing/scaling from the bass
-                pos *= 1.0 + (uBass * 0.15);
+                // Heartbeat / Breathing effect
+                pos *= 1.0 + (uBass * 0.25);
 
-                vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
-                vPos = mvPosition.xyz; // Pass to fragment for depth fading
-                
-                gl_Position = projectionMatrix * mvPosition;
+                vNormal = normalize(normalMatrix * normal);
+                vec4 worldPosition = modelMatrix * vec4(pos, 1.0);
+                vWorldPos = worldPosition.xyz;
+
+                gl_Position = projectionMatrix * viewMatrix * worldPosition;
             }
         `,
         fragmentShader: `
             uniform float uTime;
             uniform float uTreble;
+            uniform float uBass;
 
             varying vec2 vUv;
             varying float vAudioVal;
-            varying vec3 vPos;
+            varying vec3 vNormal;
+            varying vec3 vWorldPos;
 
             void main() {
-                // Procedural Digital Wireframe
-                vec2 grid = abs(fract(vUv * vec2(200.0, 40.0) + vec2(uTime * 0.1, uTime * 0.2)) - 0.5);
-                float line = smoothstep(0.35, 0.45, max(grid.x, grid.y));
-
-                // Strict Palette: Soft Pink & Soft Blue
+                // Strict Palette: Soft Pink & Soft Blue & White
                 vec3 pink = vec3(1.0, 0.71, 0.75);
                 vec3 blue = vec3(0.67, 0.84, 0.90);
                 vec3 white = vec3(1.0, 1.0, 1.0);
                 
-                // Color flows along the knot over time
-                float colorMix = sin(vUv.x * 12.0 + uTime) * 0.5 + 0.5;
-                vec3 baseNeon = mix(pink, blue, colorMix);
+                // Base color shifts fluidly over the surface
+                float colorMix = sin(vUv.x * 10.0 + uTime * 2.0 + vAudioVal) * 0.5 + 0.5;
+                vec3 baseColor = mix(pink, blue, colorMix);
 
-                // Heavy audio spikes flash bright white
-                vec3 glowColor = mix(baseNeon, white, vAudioVal * 0.6);
-
-                // Calculate final intensity
-                float intensity = 0.3 + (vAudioVal * 4.0) + (uTreble * 3.0);
-                vec3 neonGlow = glowColor * line * intensity;
-
-                // The base of the knot is pitch black metal
-                vec3 surfaceColor = vec3(0.01) * (1.0 - line);
-
-                // Apply cinematic depth fade (fog)
-                float depthFade = exp(-abs(vPos.z) * 0.008);
+                // Fresnel Effect (Creates a wet, liquid-rimmed pearlescent look)
+                vec3 viewDir = normalize(cameraPosition - vWorldPos);
+                float fresnelTerm = dot(viewDir, vNormal);
+                fresnelTerm = clamp(1.0 - fresnelTerm, 0.0, 1.0);
+                fresnelTerm = pow(fresnelTerm, 3.0); // Sharpen the rim
                 
-                gl_FragColor = vec4((surfaceColor + neonGlow) * depthFade, 1.0);
+                // The core is dark and fleshy, the edges glow
+                vec3 liquidCore = baseColor * 0.15;
+                vec3 rimGlow = baseColor * fresnelTerm * (2.0 + uBass * 3.0);
+
+                // Audio Energy Flashes (Treble hits inject pure white energy into the veins)
+                float energyFlash = pow(vAudioVal, 2.0) * (uTreble * 3.0);
+                vec3 reactiveColor = mix(liquidCore + rimGlow, white, energyFlash * 0.8);
+
+                // Final color is highly saturated and glowing
+                vec3 finalColor = reactiveColor + (baseColor * energyFlash);
+                
+                // Depth fading to blend into the basement fog
+                float depthFade = exp(-abs(vWorldPos.z) * 0.015);
+                
+                gl_FragColor = vec4(finalColor * depthFade, 1.0);
             }
         `
     });
 
-    const containmentCore = new THREE.Mesh(coreGeo, coreMaterial);
-    scene.add(containmentCore);
+    const organicCore = new THREE.Mesh(coreGeo, coreMaterial);
+    scene.add(organicCore);
 
 
-    // --- 2. CONTAINMENT RINGS (Strict 45/90/135 degree correlation) ---
+    // --- 2. ORGANIC SPORE RINGS (Strict geometric correlations) ---
+    // Instead of rigid toruses, we use swarms of particles locked into rings
     const ringCount = 8;
-    const ringGeo = new THREE.TorusGeometry(35, 0.1, 16, 100);
-    const ringMat = new THREE.MeshBasicMaterial({
-        color: 0xffffff,
-        transparent: true,
-        opacity: 0.8,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false
-    });
+    const particlesPerRing = 3000;
     
-    const ringMesh = new THREE.InstancedMesh(ringGeo, ringMat, ringCount);
-    scene.add(ringMesh);
+    const ringGeometries = [];
+    const ringMaterials = [];
+    const ringSystems = [];
 
-    const dummy = new THREE.Object3D();
-    
-    // Strict Angles array
+    // The strict angles requested
     const strictAngles = [
         0,              // 0 deg
         Math.PI / 4,    // 45 deg
@@ -255,48 +278,65 @@
         Math.PI * 0.75  // 135 deg
     ];
 
-    const colors = [
-        new THREE.Color(0xFFB6C1), // Soft Pink
-        new THREE.Color(0xADD8E6)  // Soft Blue
-    ];
+    // Generate a soft glowing dot for the particles
+    const canvas = document.createElement('canvas');
+    canvas.width = 32; canvas.height = 32;
+    const ctx = canvas.getContext('2d');
+    const grad = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+    grad.addColorStop(0, 'rgba(255,255,255,1)');
+    grad.addColorStop(0.2, 'rgba(255,255,255,0.8)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 32, 32);
+    const particleTexture = new THREE.CanvasTexture(canvas);
 
-    // Setup initial rotations for the containment rings
-    for (let i = 0; i < ringCount; i++) {
-        // Distribute angles evenly across the X and Y axes
-        let angleX = strictAngles[i % 4];
-        let angleY = strictAngles[Math.floor(i / 2) % 4];
+    for (let r = 0; r < ringCount; r++) {
+        let geo = new THREE.BufferGeometry();
+        let pos = new Float32Array(particlesPerRing * 3);
+        let baseRadius = 35 + (r * 2); // Slightly staggered radii
         
-        dummy.position.set(0, 0, 0);
-        dummy.rotation.set(angleX, angleY, 0);
-        dummy.updateMatrix();
+        // Save the base positions so we can deform them dynamically
+        let basePos = new Float32Array(particlesPerRing * 3); 
+
+        for (let i = 0; i < particlesPerRing; i++) {
+            let theta = (i / particlesPerRing) * Math.PI * 2;
+            // Add a little organic fuzziness to the ring
+            let fuzzX = (Math.random() - 0.5) * 1.5;
+            let fuzzY = (Math.random() - 0.5) * 1.5;
+            let fuzzZ = (Math.random() - 0.5) * 1.5;
+
+            let x = Math.cos(theta) * baseRadius + fuzzX;
+            let y = Math.sin(theta) * baseRadius + fuzzY;
+            let z = fuzzZ;
+
+            pos[i*3] = x; pos[i*3+1] = y; pos[i*3+2] = z;
+            basePos[i*3] = x; basePos[i*3+1] = y; basePos[i*3+2] = z;
+        }
+
+        geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        geo.userData.basePos = basePos; // Store original positions
+
+        let mat = new THREE.PointsMaterial({
+            size: 0.8,
+            map: particleTexture,
+            color: (r % 2 === 0) ? 0xFFB6C1 : 0xADD8E6, // Pink and Blue
+            transparent: true,
+            opacity: 0.6,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+        });
+
+        let system = new THREE.Points(geo, mat);
         
-        ringMesh.setMatrixAt(i, dummy.matrix);
+        // Lock them into the strict requested angles
+        let angleX = strictAngles[r % 4];
+        let angleY = strictAngles[Math.floor(r / 2) % 4];
+        system.rotation.set(angleX, angleY, 0);
         
-        // Alternate colors
-        ringMesh.setColorAt(i, colors[i % 2]);
+        scene.add(system);
+        ringSystems.push(system);
     }
-    ringMesh.instanceMatrix.needsUpdate = true;
 
-
-    // --- 3. BACKGROUND DUST (Ambient Depth) ---
-    const dustCount = 3000;
-    const dustGeo = new THREE.BufferGeometry();
-    const dustPos = new Float32Array(dustCount * 3);
-    for (let i = 0; i < dustCount; i++) {
-        dustPos[i*3] = (Math.random() - 0.5) * 200;
-        dustPos[i*3+1] = (Math.random() - 0.5) * 200;
-        dustPos[i*3+2] = (Math.random() - 0.5) * 200;
-    }
-    dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
-    const dustMat = new THREE.PointsMaterial({
-        color: 0xffffff,
-        size: 0.3,
-        transparent: true,
-        opacity: 0.3,
-        depthWrite: false
-    });
-    const dustSystem = new THREE.Points(dustGeo, dustMat);
-    scene.add(dustSystem);
 
     window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
@@ -319,68 +359,81 @@
         // 1. Audio Processing & GPU Texture Update
         analyser.getByteFrequencyData(dataArray);
         
+        // Massive signal booster to ensure deep reactivity to all layers of music
         for(let i=0; i<dataArray.length; i++) {
-            // Amplified so the spikes trigger noticeably even on mid-volume songs
-            audioData[i] = Math.min(255, dataArray[i] * 2.2);
+            audioData[i] = Math.min(255, dataArray[i] * 2.8);
         }
         audioTexture.needsUpdate = true;
 
         // 2. Compute Global Audio Envelopes
         let bassSum = 0, midSum = 0, trebleSum = 0;
         for (let i = 0; i < 15; i++) bassSum += (dataArray[i] / 255.0);
-        for (let i = 20; i < 100; i++) midSum += (dataArray[i] / 255.0);
+        for (let i = 20; i < 120; i++) midSum += (dataArray[i] / 255.0);
         for (let i = 150; i < 255; i++) trebleSum += (dataArray[i] / 255.0);
         
         let rawBass = bassSum / 15;
-        let rawMids = midSum / 80;
+        let rawMids = midSum / 100;
         let rawTreble = trebleSum / 105;
 
-        // Smooth envelopes
+        // Apply organic smoothing envelopes
         envBass = smoothAudio(envBass, rawBass * 1.8);
-        envMids = smoothAudio(envMids, rawMids * 1.8);
-        envTreble = smoothAudio(envTreble, rawTreble * 2.0);
+        envMids = smoothAudio(envMids, rawMids * 2.0);
+        envTreble = smoothAudio(envTreble, rawTreble * 2.5);
 
-        // 3. Update the Plasma Core
+        // 3. Update the Liquid Heart Core
         coreUniforms.uTime.value = time;
         coreUniforms.uBass.value = envBass;
         coreUniforms.uMids.value = envMids;
         coreUniforms.uTreble.value = envTreble;
 
-        // Rotate the core slowly
-        containmentCore.rotation.y = time * 0.15;
-        containmentCore.rotation.x = time * 0.05;
+        // Slowly tumble the core
+        organicCore.rotation.y = time * 0.15;
+        organicCore.rotation.x = time * 0.1;
 
-        // 4. Update the Containment Rings
-        // Bass causes the rings to dilate/expand outward violently
-        let ringScale = 1.0 + (envBass * 0.6);
-        
-        for (let i = 0; i < ringCount; i++) {
-            let angleX = strictAngles[i % 4];
-            let angleY = strictAngles[Math.floor(i / 2) % 4];
+        // 4. Update the Spore Rings
+        // Bass blows the rings outward, Treble makes them scatter locally
+        for (let r = 0; r < ringCount; r++) {
+            let sys = ringSystems[r];
+            let posAttr = sys.geometry.attributes.position;
+            let basePos = sys.geometry.userData.basePos;
             
-            // The entire containment field rotates on Z over time
-            let spinZ = time * 0.2 * (i % 2 === 0 ? 1 : -1); 
+            // The rings spin on their local Z axis over time
+            sys.rotation.z = time * 0.1 * (r % 2 === 0 ? 1 : -1);
 
-            dummy.position.set(0, 0, 0);
-            dummy.rotation.set(angleX, angleY, spinZ);
-            dummy.scale.set(ringScale, ringScale, ringScale);
-            dummy.updateMatrix();
+            // Particles react to music
+            for(let i = 0; i < particlesPerRing; i++) {
+                let bx = basePos[i*3];
+                let by = basePos[i*3+1];
+                let bz = basePos[i*3+2];
+                
+                // Bass expands the radius globally
+                let expansion = 1.0 + (envBass * 0.4);
+                
+                // Treble causes local frantic jittering (like excited electrons)
+                let jitter = envTreble * 2.0;
+                let jx = (Math.random() - 0.5) * jitter;
+                let jy = (Math.random() - 0.5) * jitter;
+                let jz = (Math.random() - 0.5) * jitter;
+
+                posAttr.array[i*3] = (bx * expansion) + jx;
+                posAttr.array[i*3+1] = (by * expansion) + jy;
+                posAttr.array[i*3+2] = (bz * expansion) + jz;
+            }
+            posAttr.needsUpdate = true;
             
-            ringMesh.setMatrixAt(i, dummy.matrix);
+            // Rings glow brighter with the high hats/synths
+            sys.material.opacity = 0.4 + (envTreble * 0.6);
+            sys.material.size = 0.8 + (envTreble * 1.5);
         }
-        ringMesh.instanceMatrix.needsUpdate = true;
+
+        // 5. Cinematic Reactive Camera
+        // Drift slowly around the specimen
+        camera.position.x = Math.sin(time * 0.1) * 30;
+        camera.position.y = Math.cos(time * 0.15) * 15;
         
-        // Treble makes the rings glow aggressively
-        ringMat.opacity = 0.3 + (envTreble * 0.7);
-
-        // 5. Cinematic Camera Orbit
-        // Drift around the core, reacting slightly to bass
-        camera.position.x = Math.sin(time * 0.1) * (20 + envBass * 5);
-        camera.position.y = Math.cos(time * 0.15) * 10;
+        // Bass hits cause a heavy physical camera bump
+        camera.position.z = 70 - (envBass * 12.0);
         camera.lookAt(0, 0, 0);
-
-        // Dust rotation
-        dustSystem.rotation.y = time * 0.05;
 
         renderer.render(scene, camera);
     }
