@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Audioactive Visualizer - Hypnotic KIFS Cavern</title>
+    <title>Audioactive Visualizer - Autonomous FFT Cavern</title>
     <style>
         body, html {
             margin: 0;
@@ -13,6 +13,7 @@
             overflow: hidden;
             background-color: #000;
             font-family: 'Courier New', Courier, monospace;
+            cursor: pointer; /* Suggests clicking to init audio if blocked */
         }
         canvas {
             display: block;
@@ -23,44 +24,65 @@
             height: 100%;
             z-index: 1;
         }
+        #init-overlay {
+            position: absolute;
+            z-index: 10;
+            color: rgba(255, 255, 255, 0.4);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            font-size: 14px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            transition: opacity 2s ease;
+        }
         body { transition: opacity 2s ease-in-out; }
     </style>
 </head>
 <body>
 
+<div id="init-overlay">[ Waiting for Audio Context - Click if paused ]</div>
 <canvas id="webgl-canvas"></canvas>
 
 <script>
     // --- AUDIO & STATE ---
     let audioContext, analyser, dataArray;
-    let smoothedEnergy = 0;
     let isRunning = false;
     let audioInitialized = false;
 
-    // Advanced Rate of Change Engine (Delta in ms)
-    const keyState = {
-        '1': { lastPress: 0, delta: 3000 }, // Hue Shift
-        '2': { lastPress: 0, delta: 3000 }, // Forward Velocity
-        '3': { lastPress: 0, delta: 3000 }, // Grid Spacing
-        '4': { lastPress: 0, delta: 3000 }, // Audio Swell (Deform)
-        '5': { lastPress: 0, delta: 3000 }, // Fog Density
-        '6': { lastPress: 0, delta: 3000 }, // Gentle Spin
-        'ArrowLeft': { lastPress: 0, delta: 3000 } // Subtle Chromatic Shift
-    };
+    // Smoothed FFT Bands
+    let smoothedBass = 0;
+    let smoothedMids = 0;
+    let smoothedTreble = 0;
+    let smoothedEnergy = 0;
 
     // --- AUDIO INIT ---
     async function initAudio() {
-        if (audioInitialized) return;
+        if (audioInitialized) {
+            if (audioContext.state === 'suspended') {
+                await audioContext.resume();
+            }
+            return;
+        }
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
             const source = audioContext.createMediaStreamSource(stream);
             analyser = audioContext.createAnalyser();
+            
+            // 512 bins for detailed frequency isolation
             analyser.fftSize = 512;
-            // Extremely high smoothing (0.92) to prevent flashing/twitching
+            
+            // Extreme hardware smoothing to prevent flashing/stuttering
             analyser.smoothingTimeConstant = 0.92; 
+            
             source.connect(analyser);
             dataArray = new Uint8Array(analyser.frequencyBinCount);
+            
+            document.getElementById('init-overlay').style.opacity = 0;
             
             audioInitialized = true;
             if (audioContext.state === 'running') {
@@ -71,38 +93,21 @@
             console.warn("Microphone access pending or denied.", err);
         }
     }
+    
+    // Auto-init on load, fallback to click if browser blocks it
     window.addEventListener('load', initAudio);
-
-    // --- INPUT LOGIC ---
-    function updateRate(key) {
-        const now = performance.now();
-        const state = keyState[key];
-        if (state.lastPress > 0) {
-            let d = now - state.lastPress;
-            if (d < 4000) state.delta = (state.delta * 0.2) + (d * 0.8); 
-        }
-        state.lastPress = now;
-    }
-
-    function mapDelta(delta, fastVal, slowVal) {
-        let clamped = Math.max(100, Math.min(3000, delta));
-        let t = (clamped - 100) / (2900); 
-        return fastVal + t * (slowVal - fastVal);
-    }
-
-    window.addEventListener('keydown', async (e) => {
-        if (!audioInitialized) await initAudio();
+    window.addEventListener('click', () => {
+        initAudio();
         if (audioContext && audioContext.state === 'suspended') {
-            await audioContext.resume();
+            audioContext.resume();
             isRunning = true;
             requestAnimationFrame(render);
         }
+    });
 
-        if (!isRunning) return;
-
-        if (keyState[e.key] !== undefined) {
-            updateRate(e.key);
-        } else if (e.key === ' ') {
+    // Spacebar to navigate back
+    window.addEventListener('keydown', (e) => {
+        if (e.key === ' ') {
             document.body.style.opacity = 0;
             setTimeout(() => window.location.href = 'index.html', 2000);
         }
@@ -121,9 +126,9 @@
         precision highp float;
         uniform vec2 u_resolution;
         uniform float u_time;
-        uniform float u_audio;
+        uniform float u_audio; // Overall energy
         
-        // Dynamic Params
+        // FFT Driven Params
         uniform float u_hueSpeed;
         uniform float u_zoom;
         uniform float u_density;
@@ -140,26 +145,27 @@
         vec2 map(vec3 p) {
             vec3 z = p;
             
-            // Slow, creeping forward motion
-            z.z -= u_time * (0.2 + u_zoom);
+            // Bass drives the forward momentum
+            z.z -= u_time * u_zoom;
             
-            // Very gentle spatial twist
-            z.xy *= rot(z.z * u_glitch * 0.02 + sin(u_time * 0.5) * 0.02);
+            // Treble drives a very subtle chromatic spatial twist
+            z.xy *= rot(z.z * u_glitch * 0.02 + sin(u_time * 0.3) * 0.02);
             
-            // Infinite Grid Repetition (spaced out so it feels massive, not cluttered)
+            // Grid Repetition driven by Mids
             float grid = 5.0 - u_density; 
             z = mod(z + grid/2.0, grid) - grid/2.0;
             
             float scale = 1.0;
             float iterCount = 0.0;
             
-            // Smooth, fluid folding angles
-            float foldAngle1 = (u_time * 0.1) * u_spin + (u_audio * u_deform * 0.2);
-            float foldAngle2 = (u_time * 0.05) * u_spin - (u_audio * u_deform * 0.1);
+            // Mids drive the rotation
+            float foldAngle1 = (u_time * 0.08) * u_spin + (u_deform * 0.15);
+            float foldAngle2 = (u_time * 0.04) * u_spin - (u_deform * 0.08);
             
-            for(int i = 0; i < 5; i++) { // Reduced iterations for softer geometry
-                // Audio gently swells the void spaces rather than tearing them
-                z = abs(z) - vec3(0.6 + u_audio * u_deform * 0.1, 0.5, 0.4);
+            // 5 Iterations for a soft, ambient geometry
+            for(int i = 0; i < 5; i++) { 
+                // Bass (u_deform) gently swells the void spaces
+                z = abs(z) - vec3(0.6 + u_deform * 0.1, 0.5, 0.4);
                 
                 z.xy *= rot(foldAngle1 + float(i) * 0.15);
                 z.xz *= rot(foldAngle2);
@@ -178,9 +184,9 @@
         }
 
         vec3 getNeonColor(vec3 p) {
-            float colorSeed = fract(p.x * 0.1 + p.z * 0.1 + u_time * u_hueSpeed * 0.2);
+            // Treble drives how fast the colors morph across the space
+            float colorSeed = fract(p.x * 0.1 + p.z * 0.1 + u_time * u_hueSpeed * 0.15);
             
-            // Deeper, richer tones of soft pink and blue. Reduced pure white.
             if (colorSeed < 0.4) {
                 return vec3(0.9, 0.4, 0.6); // Deep Soft Pink
             } else if (colorSeed < 0.8) {
@@ -193,8 +199,8 @@
         void main() {
             vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / u_resolution.y;
             
-            // Subtle aberration
-            float split = u_glitch * 0.003;
+            // Subtle aberration tied to Treble
+            float split = u_glitch * 0.004;
             
             vec3 ro = vec3(0.0, 0.0, -2.5); 
             vec3 col = vec3(0.0);
@@ -224,7 +230,7 @@
                 }
                 
                 if(t < 15.0) {
-                    // Heavy, oppressive fog to hide jarring details
+                    // Deep fog
                     float fog = exp(-u_fog * t * t * 0.5); 
                     
                     vec3 neon = getNeonColor(p);
@@ -232,8 +238,8 @@
                     float structLight = max(0.0, 1.0 - res.y * 0.1);
                     vec3 baseCol = vec3(0.02) * structLight; // Very dark base metal
                     
-                    // Audio modulates the volumetric glow smoothly
-                    float smoothGlow = accumulatedGlow * (0.02 + u_audio * 0.05);
+                    // Overall audio energy modulates the volumetric glow smoothly
+                    float smoothGlow = accumulatedGlow * (0.02 + u_audio * 0.06);
                     baseCol += neon * smoothGlow;
                     
                     if (c == 0) col.r = (baseCol * fog).r;
@@ -296,21 +302,60 @@
         requestAnimationFrame(render);
         
         analyser.getByteFrequencyData(dataArray);
-        let sum = 0;
-        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
-        let rawEnergy = sum / dataArray.length / 255;
-        // Exceptionally smooth interpolation
+        
+        // --- FFT FREQUENCY BANDS ---
+        let bassSum = 0, midSum = 0, trebleSum = 0, totalSum = 0;
+        
+        // Define ranges for 256 bins (analyser.frequencyBinCount)
+        const bassEnd = 10;      // Low frequencies
+        const midEnd = 120;      // Mid frequencies
+        const trebleEnd = 250;   // High frequencies
+        
+        for (let i = 0; i < 256; i++) {
+            let val = dataArray[i] / 255.0;
+            totalSum += val;
+            
+            if (i < bassEnd) {
+                bassSum += val;
+            } else if (i < midEnd) {
+                midSum += val;
+            } else if (i < trebleEnd) {
+                trebleSum += val;
+            }
+        }
+        
+        // Calculate raw averages
+        let rawBass = bassSum / bassEnd;
+        let rawMids = midSum / (midEnd - bassEnd);
+        let rawTreble = trebleSum / (trebleEnd - midEnd);
+        let rawEnergy = totalSum / 256;
+
+        // --- SOFTWARE SMOOTHING ---
+        // Apply secondary smoothing in JS for highly hypnotic, liquid movement
+        smoothedBass = smoothedBass * 0.9 + rawBass * 0.1;
+        smoothedMids = smoothedMids * 0.9 + rawMids * 0.1;
+        smoothedTreble = smoothedTreble * 0.9 + rawTreble * 0.1;
         smoothedEnergy = smoothedEnergy * 0.9 + rawEnergy * 0.1;
 
-        // Capped, elegant parameter ranges (No chaotic extremes)
-        let dynHueSpeed = mapDelta(keyState['1'].delta, 1.0, 0.05);   // Smooth morph
-        let dynZoom     = mapDelta(keyState['2'].delta, 2.5, 0.1);    // Gentle float
-        let dynDensity  = mapDelta(keyState['3'].delta, 1.0, 0.0);    // Moderate spacing
-        let dynDeform   = mapDelta(keyState['4'].delta, 1.5, 0.0);    // Soft structural breathing
-        let dynFog      = mapDelta(keyState['5'].delta, 0.15, 0.05);  // Always dark and deep
-        let dynSpin     = mapDelta(keyState['6'].delta, 1.0, 0.1);    // Hypnotic turning
-        let dynGlitch   = mapDelta(keyState['ArrowLeft'].delta, 1.0, 0.0); // Very mild edge split
+        // --- DYNAMIC FFT PARAMETER MAPPING ---
+        // Base values + Audio influence
+        
+        // Treble drives color morph speed and chromatic edges
+        let dynHueSpeed = 0.5 + (smoothedTreble * 2.0);
+        let dynGlitch   = smoothedTreble * 1.5;
+        
+        // Bass drives forward velocity and geometric swelling
+        let dynZoom     = 0.2 + (smoothedBass * 1.2);
+        let dynDeform   = smoothedBass * 2.5;
+        
+        // Mids drive rotation and structural complexity
+        let dynSpin     = 0.5 + (smoothedMids * 1.5);
+        let dynDensity  = 0.0 + (smoothedMids * 1.2);
+        
+        // Energy drives fog depth (heavy bass lifts the fog slightly)
+        let dynFog      = 0.12 - (smoothedEnergy * 0.04);
 
+        // --- SHADER UNIFORMS ---
         gl.uniform2f(uniforms.res, glCanvas.width, glCanvas.height);
         gl.uniform1f(uniforms.time, time * 0.001);
         gl.uniform1f(uniforms.audio, smoothedEnergy);
