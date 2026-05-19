@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Audioactive Visualizer - Cybernetic Wormhole</title>
+    <title>Audioactive Visualizer - Infinite Audio Tunnel</title>
     <!-- Import Three.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
@@ -44,7 +44,7 @@
 </head>
 <body>
 
-<div id="init-overlay">[ CLICK ANYWHERE TO ENTER WORMHOLE ]</div>
+<div id="init-overlay">[ CLICK ANYWHERE TO ENTER TUNNEL ]</div>
 
 <script>
     // --- AUDIO & STATE ---
@@ -56,8 +56,10 @@
     let audioTexture;
     let audioData = new Uint8Array(256);
 
-    // Audio Envelopes (Ensures buttery smooth, jitter-free reactions)
+    // Audio Envelopes & Flight Distance
     let envBass = 0, envMids = 0, envTreble = 0;
+    let flightDistance = 0; // Tracks cumulative speed for smooth acceleration/deceleration
+    
     const ATTACK = 0.25; 
     const RELEASE = 0.04; 
 
@@ -80,7 +82,7 @@
             analyser = audioContext.createAnalyser();
             
             analyser.fftSize = 512;
-            analyser.smoothingTimeConstant = 0.65; // Highly sensitive base reading
+            analyser.smoothingTimeConstant = 0.65; 
             
             source.connect(analyser);
             dataArray = new Uint8Array(analyser.frequencyBinCount);
@@ -116,12 +118,11 @@
     scene.fog = new THREE.FogExp2(0x010101, 0.006); // Deep fog hides the end of the tunnel
     
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 500);
-    camera.position.set(0, 0, 0); // Looking down the -Z axis
+    camera.position.set(0, 0, 0); 
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    // Use additive blending globally for a highly glowing, neon look
     renderer.setClearColor(0x010101, 1);
     document.body.appendChild(renderer.domElement);
 
@@ -130,21 +131,23 @@
     audioTexture.magFilter = THREE.LinearFilter; 
     audioTexture.minFilter = THREE.LinearFilter;
 
-    // --- 1. THE CYBER-TUBE (Wormhole Walls) ---
+    // --- THE CYBER-TUBE SHADER ---
     const tubeGeo = new THREE.CylinderGeometry(30, 30, 400, 64, 128);
-    tubeGeo.rotateX(Math.PI / 2); // Lay flat along Z axis
-    tubeGeo.translate(0, 0, -200); // Push into the screen
+    tubeGeo.rotateX(Math.PI / 2); 
+    tubeGeo.translate(0, 0, -200); 
 
     const tubeUniforms = {
         uTime: { value: 0 },
+        uScroll: { value: 0 }, // Driven by bass-integrated speed
         uAudioTex: { value: audioTexture },
         uBass: { value: 0 },
-        uMids: { value: 0 }
+        uMids: { value: 0 },
+        uTreble: { value: 0 }
     };
 
     const tubeMaterial = new THREE.ShaderMaterial({
         uniforms: tubeUniforms,
-        side: THREE.BackSide, // We are inside the tube
+        side: THREE.BackSide, 
         transparent: true,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
@@ -162,62 +165,61 @@
                 vUv = uv;
                 vec3 pos = position;
 
-                // 1. Map Audio around the circumference of the tube
+                // Map Audio around the circumference of the tube
                 float angle = atan(pos.y, pos.x);
                 float freq = abs(angle / 3.14159); // 0 to 1
                 float audioVal = texture2D(uAudioTex, vec2(freq, 0.5)).r;
                 vAudioVal = audioVal;
 
-                // 2. Audio Expansion (Bass pushes the tunnel walls outward)
-                float expansion = 1.0 + (audioVal * uBass * 0.4);
+                // Audio Expansion (Bass pushes the tunnel walls outward like a shockwave)
+                float expansion = 1.0 + (audioVal * uBass * 0.5);
                 pos.x *= expansion;
                 pos.y *= expansion;
 
-                // 3. The Snake Bend
-                // The tunnel writhes like a snake, intensifying further away from the camera
+                // The Snake Bend
                 float distFromCam = abs(pos.z);
-                float dampening = smoothstep(0.0, 150.0, distFromCam); // Keeps the entrance stable
+                float dampening = smoothstep(0.0, 150.0, distFromCam); 
                 
                 float bendX = sin(pos.z * 0.01 + uTime * 0.8) * 40.0;
                 float bendY = cos(pos.z * 0.015 + uTime * 0.6) * 40.0;
                 
                 // Mids amplify the writhing
-                pos.x += bendX * dampening * (1.0 + uMids * 1.5);
-                pos.y += bendY * dampening * (1.0 + uMids * 1.5);
+                pos.x += bendX * dampening * (1.0 + uMids * 2.0);
+                pos.y += bendY * dampening * (1.0 + uMids * 2.0);
 
                 vPos = pos;
                 gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
             }
         `,
         fragmentShader: `
-            uniform float uTime;
+            uniform float uScroll;
             uniform float uBass;
+            uniform float uTreble;
 
             varying vec2 vUv;
             varying float vAudioVal;
             varying vec3 vPos;
 
             void main() {
-                // Scroll the texture forward based on Time + Bass (Creates flight illusion)
+                // Scroll the texture perfectly synced to the accumulated flight speed
                 vec2 scrolledUv = vUv;
-                scrolledUv.y -= uTime * (0.5 + uBass * 1.5); 
+                scrolledUv.y -= uScroll; 
                 
                 // Procedural Digital Grid
                 vec2 grid = abs(fract(scrolledUv * vec2(40.0, 100.0)) - 0.5);
                 float line = smoothstep(0.42, 0.5, max(grid.x, grid.y));
                 
-                // Deep Fade into black
-                float depthFade = exp(-abs(vPos.z) * 0.01);
+                float depthFade = exp(-abs(vPos.z) * 0.012);
 
                 // Strict Palette: Soft Pink & Soft Blue
                 vec3 pink = vec3(1.0, 0.71, 0.75);
                 vec3 blue = vec3(0.67, 0.84, 0.90);
                 
-                // Alternate colors around the tube
+                // Alternate colors wrapping around the tube
                 vec3 baseColor = mix(pink, blue, sin(vUv.x * 30.0) * 0.5 + 0.5);
                 
-                // Glow massively when hit by audio
-                vec3 finalColor = baseColor * line * (0.5 + vAudioVal * 4.0);
+                // Glow massively based on local frequency hitting the wall, plus global treble strikes
+                vec3 finalColor = baseColor * line * (0.5 + vAudioVal * 4.0 + uTreble * 3.0);
                 
                 gl_FragColor = vec4(finalColor * depthFade, 1.0);
             }
@@ -226,86 +228,6 @@
 
     const tube = new THREE.Mesh(tubeGeo, tubeMaterial);
     scene.add(tube);
-
-
-    // --- 2. FLOATING ARTIFACTS (Circles & Fine Geometric Lines) ---
-    
-    // Strict Palette
-    const colors = [
-        new THREE.Color(0xFFB6C1), // Soft Pink
-        new THREE.Color(0xADD8E6), // Soft Blue
-        new THREE.Color(0xFFFFFF)  // White
-    ];
-
-    // Shared Additive Material for Artifacts
-    const artifactMat = new THREE.MeshBasicMaterial({
-        color: 0xffffff,
-        transparent: true,
-        opacity: 0.8,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false
-    });
-
-    // A. The Rings (Torus)
-    const ringCount = 150;
-    const ringGeo = new THREE.TorusGeometry(3, 0.05, 8, 32); // Very thin, hollow rings
-    const ringMesh = new THREE.InstancedMesh(ringGeo, artifactMat, ringCount);
-    
-    // B. The Fine Arrows (Long Cylinders)
-    const lineCount = 300;
-    const lineGeo = new THREE.CylinderGeometry(0.04, 0.04, 15, 8); // Fine, long lines
-    lineGeo.rotateX(Math.PI / 2); // Point them down the tunnel
-    const lineMesh = new THREE.InstancedMesh(lineGeo, artifactMat, lineCount);
-
-    scene.add(ringMesh);
-    scene.add(lineMesh);
-
-    // Arrays to store artifact data (Z-position, offset, scale multipliers)
-    const artifactData = [];
-    const dummy = new THREE.Object3D();
-
-    // Initialize Rings
-    for (let i = 0; i < ringCount; i++) {
-        let z = -Math.random() * 400;
-        let angle = Math.random() * Math.PI * 2;
-        let radius = Math.random() * 20; // Scattered inside the tube
-        
-        let c = colors[Math.floor(Math.random() * colors.length)];
-        ringMesh.setColorAt(i, c);
-
-        artifactData.push({
-            type: 'ring',
-            idx: i,
-            xOffset: Math.cos(angle) * radius,
-            yOffset: Math.sin(angle) * radius,
-            z: z,
-            scaleMod: 1.0 + Math.random() * 1.5
-        });
-    }
-
-    // Initialize Fine Lines (Strict 45, 90, 135, 180 degree angles)
-    const strictAngles = [0, Math.PI/4, Math.PI/2, Math.PI*0.75];
-
-    for (let i = 0; i < lineCount; i++) {
-        let z = -Math.random() * 400;
-        let rotZ = strictAngles[Math.floor(Math.random() * strictAngles.length)];
-        
-        let angle = Math.random() * Math.PI * 2;
-        let radius = 5 + Math.random() * 20; 
-        
-        let c = colors[Math.floor(Math.random() * colors.length)];
-        lineMesh.setColorAt(i, c);
-
-        artifactData.push({
-            type: 'line',
-            idx: i,
-            xOffset: Math.cos(angle) * radius,
-            yOffset: Math.sin(angle) * radius,
-            z: z,
-            rotZ: rotZ,
-            scaleMod: 0.5 + Math.random() * 1.5
-        });
-    }
 
     window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
@@ -323,12 +245,12 @@
             return;
         }
 
+        let delta = clock.getDelta();
         const time = clock.getElapsedTime();
 
         // 1. Audio Processing & GPU Texture Update
         analyser.getByteFrequencyData(dataArray);
         
-        // Massive signal booster so visual reacts deeply to all volumes
         for(let i=0; i<dataArray.length; i++) {
             audioData[i] = Math.min(255, dataArray[i] * 2.5);
         }
@@ -349,61 +271,24 @@
         envMids = smoothAudio(envMids, rawMids * 1.8);
         envTreble = smoothAudio(envTreble, rawTreble * 2.0);
 
+        // 3. FLIGHT SPEED MECHANIC
+        // Base ambient speed is 0.2. Heavy bass accelerates you up to 6.0+
+        let flightSpeed = 0.2 + (envBass * 6.0);
+        
+        // Accumulate distance instead of multiplying by raw time to prevent backward jumping/jitter
+        flightDistance += flightSpeed * delta; 
+
         // Update Tube Uniforms
         tubeUniforms.uTime.value = time;
+        tubeUniforms.uScroll.value = flightDistance; 
         tubeUniforms.uBass.value = envBass;
         tubeUniforms.uMids.value = envMids;
+        tubeUniforms.uTreble.value = envTreble;
 
-        // 3. Update Artifacts (Rings & Lines flying at the camera)
-        // Base flight speed + massive boost on Bass hits
-        let flightSpeed = 1.0 + (envBass * 4.0);
-
-        for (let i = 0; i < artifactData.length; i++) {
-            let art = artifactData[i];
-            
-            // Move forward
-            art.z += flightSpeed;
-            
-            // Loop back to the end of the tunnel if passed the camera
-            if (art.z > 5) art.z = -400;
-
-            // Follow the Snake Bend of the tunnel perfectly
-            // (Math must match the Vertex Shader exactly)
-            let dampening = Math.min(1.0, Math.max(0.0, Math.abs(art.z) / 150.0));
-            let bendX = Math.sin(art.z * 0.01 + time * 0.8) * 40.0;
-            let bendY = Math.cos(art.z * 0.015 + time * 0.6) * 40.0;
-
-            let finalX = art.xOffset + (bendX * dampening * (1.0 + envMids * 1.5));
-            let finalY = art.yOffset + (bendY * dampening * (1.0 + envMids * 1.5));
-
-            dummy.position.set(finalX, finalY, art.z);
-
-            if (art.type === 'ring') {
-                // Rings dilate drastically with the Treble & Mids
-                let scale = art.scaleMod * (1.0 + envTreble * 3.0);
-                dummy.scale.set(scale, scale, scale);
-                // Gentle tumble
-                dummy.rotation.set(time * 0.5, time * 0.3, 0);
-                dummy.updateMatrix();
-                ringMesh.setMatrixAt(art.idx, dummy.matrix);
-            } 
-            else if (art.type === 'line') {
-                // Lines extend and sharpen with the Treble
-                let lengthScale = art.scaleMod * (1.0 + envTreble * 5.0);
-                dummy.scale.set(1, 1, lengthScale); // Scale along Z
-                
-                // Strict angular correlation maintained
-                dummy.rotation.set(0, 0, art.rotZ); 
-                dummy.updateMatrix();
-                lineMesh.setMatrixAt(art.idx, dummy.matrix);
-            }
-        }
-        
-        ringMesh.instanceMatrix.needsUpdate = true;
-        lineMesh.instanceMatrix.needsUpdate = true;
-
-        // Glow intensity of artifacts pulses with the beat
-        artifactMat.opacity = 0.4 + (envTreble * 0.6);
+        // Add a slight camera shake on extreme bass hits
+        camera.rotation.z = Math.sin(time * 15.0) * envBass * 0.05;
+        camera.position.x = Math.cos(time * 20.0) * envBass * 0.5;
+        camera.position.y = Math.sin(time * 22.0) * envBass * 0.5;
 
         renderer.render(scene, camera);
     }
