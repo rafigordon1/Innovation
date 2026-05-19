@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Audioactive Visualizer - Infinite Audio Tunnel</title>
+    <title>Audioactive Visualizer - Smooth Infinite Tunnel</title>
     <!-- Import Three.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
@@ -52,16 +52,19 @@
     let isRunning = false;
     let audioInitialized = false;
 
-    // Texture for GPU Shader
     let audioTexture;
     let audioData = new Uint8Array(256);
 
-    // Audio Envelopes & Flight Distance
+    // Audio Envelopes
     let envBass = 0, envMids = 0, envTreble = 0;
-    let flightDistance = 0; // Tracks cumulative speed for smooth acceleration/deceleration
     
-    const ATTACK = 0.25; 
-    const RELEASE = 0.04; 
+    // Flight Physics (Inertia)
+    let flightDistance = 0; 
+    let currentFlightSpeed = 0.1; // Base idle speed
+    
+    // Smoother attack/release to prevent twitching
+    const ATTACK = 0.15; 
+    const RELEASE = 0.02; 
 
     function smoothAudio(current, target) {
         return (target > current) 
@@ -82,7 +85,7 @@
             analyser = audioContext.createAnalyser();
             
             analyser.fftSize = 512;
-            analyser.smoothingTimeConstant = 0.65; 
+            analyser.smoothingTimeConstant = 0.7; // Glides smoothly between frequency reads
             
             source.connect(analyser);
             dataArray = new Uint8Array(analyser.frequencyBinCount);
@@ -115,7 +118,7 @@
 
     // --- THREE.JS SETUP ---
     const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x010101, 0.006); // Deep fog hides the end of the tunnel
+    scene.fog = new THREE.FogExp2(0x010101, 0.006); 
     
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 500);
     camera.position.set(0, 0, 0); 
@@ -126,7 +129,6 @@
     renderer.setClearColor(0x010101, 1);
     document.body.appendChild(renderer.domElement);
 
-    // --- AUDIO TEXTURE ---
     audioTexture = new THREE.DataTexture(audioData, 256, 1, THREE.LuminanceFormat, THREE.UnsignedByteType);
     audioTexture.magFilter = THREE.LinearFilter; 
     audioTexture.minFilter = THREE.LinearFilter;
@@ -137,8 +139,7 @@
     tubeGeo.translate(0, 0, -200); 
 
     const tubeUniforms = {
-        uTime: { value: 0 },
-        uScroll: { value: 0 }, // Driven by bass-integrated speed
+        uScroll: { value: 0 }, 
         uAudioTex: { value: audioTexture },
         uBass: { value: 0 },
         uMids: { value: 0 },
@@ -152,7 +153,7 @@
         blending: THREE.AdditiveBlending,
         depthWrite: false,
         vertexShader: `
-            uniform float uTime;
+            uniform float uScroll;
             uniform sampler2D uAudioTex;
             uniform float uBass;
             uniform float uMids;
@@ -167,25 +168,24 @@
 
                 // Map Audio around the circumference of the tube
                 float angle = atan(pos.y, pos.x);
-                float freq = abs(angle / 3.14159); // 0 to 1
+                float freq = abs(angle / 3.14159);
                 float audioVal = texture2D(uAudioTex, vec2(freq, 0.5)).r;
                 vAudioVal = audioVal;
 
-                // Audio Expansion (Bass pushes the tunnel walls outward like a shockwave)
-                float expansion = 1.0 + (audioVal * uBass * 0.5);
+                // Audio Expansion (Bass swells the tunnel)
+                float expansion = 1.0 + (audioVal * uBass * 0.4);
                 pos.x *= expansion;
                 pos.y *= expansion;
 
-                // The Snake Bend
+                // The Snake Bend (Tied directly to uScroll so it moves perfectly with your flight)
                 float distFromCam = abs(pos.z);
                 float dampening = smoothstep(0.0, 150.0, distFromCam); 
                 
-                float bendX = sin(pos.z * 0.01 + uTime * 0.8) * 40.0;
-                float bendY = cos(pos.z * 0.015 + uTime * 0.6) * 40.0;
+                float bendX = sin(pos.z * 0.01 + uScroll * 1.5) * 40.0;
+                float bendY = cos(pos.z * 0.015 + uScroll * 1.2) * 40.0;
                 
-                // Mids amplify the writhing
-                pos.x += bendX * dampening * (1.0 + uMids * 2.0);
-                pos.y += bendY * dampening * (1.0 + uMids * 2.0);
+                pos.x += bendX * dampening * (1.0 + uMids * 1.5);
+                pos.y += bendY * dampening * (1.0 + uMids * 1.5);
 
                 vPos = pos;
                 gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
@@ -201,13 +201,21 @@
             varying vec3 vPos;
 
             void main() {
-                // Scroll the texture perfectly synced to the accumulated flight speed
+                // Scroll the texture perfectly synced to the accumulated flight distance
                 vec2 scrolledUv = vUv;
-                scrolledUv.y -= uScroll; 
+                scrolledUv.y -= uScroll * 0.4; // Scaled to map geometry cleanly
                 
                 // Procedural Digital Grid
-                vec2 grid = abs(fract(scrolledUv * vec2(40.0, 100.0)) - 0.5);
-                float line = smoothstep(0.42, 0.5, max(grid.x, grid.y));
+                // We stretch the grid rectangles longer down the Z-axis (Y in UV) 
+                // to reinforce forward momentum and kill the wagon-wheel effect.
+                vec2 grid = abs(fract(scrolledUv * vec2(30.0, 60.0)) - 0.5);
+                
+                // Vertical lines (running down the tunnel)
+                float lineX = smoothstep(0.42, 0.5, grid.x);
+                // Horizontal rings (thinner so they blur rather than strobe when moving fast)
+                float lineY = smoothstep(0.48 + (uBass * 0.015), 0.5, grid.y); 
+                
+                float line = max(lineX, lineY);
                 
                 float depthFade = exp(-abs(vPos.z) * 0.012);
 
@@ -215,11 +223,10 @@
                 vec3 pink = vec3(1.0, 0.71, 0.75);
                 vec3 blue = vec3(0.67, 0.84, 0.90);
                 
-                // Alternate colors wrapping around the tube
-                vec3 baseColor = mix(pink, blue, sin(vUv.x * 30.0) * 0.5 + 0.5);
+                vec3 baseColor = mix(pink, blue, sin(vUv.x * 20.0 + uScroll) * 0.5 + 0.5);
                 
-                // Glow massively based on local frequency hitting the wall, plus global treble strikes
-                vec3 finalColor = baseColor * line * (0.5 + vAudioVal * 4.0 + uTreble * 3.0);
+                // Glow massively based on local frequency hitting the wall + treble strikes
+                vec3 finalColor = baseColor * line * (0.4 + vAudioVal * 3.0 + uTreble * 2.0);
                 
                 gl_FragColor = vec4(finalColor * depthFade, 1.0);
             }
@@ -245,8 +252,8 @@
             return;
         }
 
-        let delta = clock.getDelta();
-        const time = clock.getElapsedTime();
+        // Cap the delta to 0.1s maximum to prevent massive position jumps if the browser lags
+        let delta = Math.min(clock.getDelta(), 0.1); 
 
         // 1. Audio Processing & GPU Texture Update
         analyser.getByteFrequencyData(dataArray);
@@ -266,29 +273,31 @@
         let rawMids = midSum / 90;
         let rawTreble = trebleSum / 105;
 
-        // Smooth envelopes
-        envBass = smoothAudio(envBass, rawBass * 1.8);
-        envMids = smoothAudio(envMids, rawMids * 1.8);
-        envTreble = smoothAudio(envTreble, rawTreble * 2.0);
+        envBass = smoothAudio(envBass, rawBass * 1.5);
+        envMids = smoothAudio(envMids, rawMids * 1.5);
+        envTreble = smoothAudio(envTreble, rawTreble * 1.5);
 
-        // 3. FLIGHT SPEED MECHANIC
-        // Base ambient speed is 0.2. Heavy bass accelerates you up to 6.0+
-        let flightSpeed = 0.2 + (envBass * 6.0);
+        // 3. SMOOTH INERTIA FLIGHT MECHANIC
+        // Target speed based on bass. It never goes below 0.1 (always moving forward)
+        let targetFlightSpeed = 0.1 + (envBass * 4.0);
         
-        // Accumulate distance instead of multiplying by raw time to prevent backward jumping/jitter
-        flightDistance += flightSpeed * delta; 
+        // Ease the current speed toward the target speed. This guarantees the movement
+        // never jerks or snaps, giving it massive, smooth momentum.
+        currentFlightSpeed += (targetFlightSpeed - currentFlightSpeed) * 0.1;
+        
+        // Accumulate distance cleanly
+        flightDistance += currentFlightSpeed * delta; 
 
         // Update Tube Uniforms
-        tubeUniforms.uTime.value = time;
         tubeUniforms.uScroll.value = flightDistance; 
         tubeUniforms.uBass.value = envBass;
         tubeUniforms.uMids.value = envMids;
         tubeUniforms.uTreble.value = envTreble;
 
-        // Add a slight camera shake on extreme bass hits
-        camera.rotation.z = Math.sin(time * 15.0) * envBass * 0.05;
-        camera.position.x = Math.cos(time * 20.0) * envBass * 0.5;
-        camera.position.y = Math.sin(time * 22.0) * envBass * 0.5;
+        // Add a smooth camera float integrated with the flight distance
+        camera.rotation.z = Math.sin(flightDistance * 2.0) * envBass * 0.05;
+        camera.position.x = Math.cos(flightDistance * 3.0) * envBass * 0.8;
+        camera.position.y = Math.sin(flightDistance * 3.5) * envBass * 0.8;
 
         renderer.render(scene, camera);
     }
