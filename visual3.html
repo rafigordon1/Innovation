@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Audioactive Visualizer - Magnetic Reactor</title>
+    <title>Audioactive Visualizer - Reactive Particle Storm</title>
     <!-- Import Three.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
@@ -13,7 +13,7 @@
             width: 100%;
             height: 100%;
             overflow: hidden;
-            background-color: #030303;
+            background-color: #020202;
             font-family: 'Courier New', Courier, monospace;
             cursor: pointer;
         }
@@ -27,13 +27,13 @@
         #init-overlay {
             position: absolute;
             z-index: 10;
-            color: rgba(255, 255, 255, 0.5);
+            color: rgba(255, 255, 255, 0.7);
             display: flex;
             justify-content: center;
             align-items: center;
             width: 100%;
             height: 100%;
-            background: rgba(0,0,0,0.8);
+            background: rgba(0,0,0,0.85);
             pointer-events: none;
             font-size: 16px;
             letter-spacing: 4px;
@@ -44,7 +44,7 @@
 </head>
 <body>
 
-<div id="init-overlay">[ CLICK ANYWHERE TO IGNITE REACTOR ]</div>
+<div id="init-overlay">[ CLICK ANYWHERE TO IGNITE PARTICLE STORM ]</div>
 
 <script>
     // --- AUDIO & STATE ---
@@ -52,20 +52,19 @@
     let isRunning = false;
     let audioInitialized = false;
 
-    // AUDIO ENVELOPE SMOOTHING (The secret to killing jitter)
-    let envBass = 0, envMids = 0, envTreble = 0;
-    
-    // Attack: How fast it jumps to the beat (0.0 to 1.0)
-    // Release: How slowly it falls back down (lower = smoother/floatier)
-    const ATTACK = 0.25; 
-    const RELEASE = 0.02; 
+    // We will pass the raw audio data array directly to the GPU shader via a texture
+    let audioTexture;
+    let audioData = new Uint8Array(256);
+
+    // Envelopes for global smooth movements
+    let envBass = 0, envTreble = 0;
+    const ATTACK = 0.3; 
+    const RELEASE = 0.05; 
 
     function smoothAudio(current, target) {
-        if (target > current) {
-            return current + (target - current) * ATTACK; 
-        } else {
-            return current + (target - current) * RELEASE;
-        }
+        return (target > current) 
+            ? current + (target - current) * ATTACK 
+            : current + (target - current) * RELEASE;
     }
 
     // --- AUDIO INIT ---
@@ -81,7 +80,7 @@
             analyser = audioContext.createAnalyser();
             
             analyser.fftSize = 512;
-            analyser.smoothingTimeConstant = 0.8; 
+            analyser.smoothingTimeConstant = 0.7; // Lower smoothing for punchier visual strikes
             
             source.connect(analyser);
             dataArray = new Uint8Array(analyser.frequencyBinCount);
@@ -114,108 +113,157 @@
 
     // --- THREE.JS SETUP ---
     const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x030303, 0.015);
+    scene.fog = new THREE.FogExp2(0x020202, 0.012);
     
-    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 15, 60);
-    camera.lookAt(0, 0, 0);
+    // Higher camera angle to look down into the reactive crater
+    const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 45, 75);
+    camera.lookAt(0, -10, 0);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     document.body.appendChild(renderer.domElement);
 
-    // --- LIGHTING ---
-    const ambientLight = new THREE.AmbientLight(0x111111);
-    scene.add(ambientLight);
-
-    const pinkLight = new THREE.PointLight(0xffb6c1, 0, 150); // Soft Pink
-    pinkLight.position.set(-20, 10, 20);
-    scene.add(pinkLight);
-
-    const blueLight = new THREE.PointLight(0xadd8e6, 0, 150); // Soft Blue
-    blueLight.position.set(20, -10, -20);
-    scene.add(blueLight);
-
-    const whiteLight = new THREE.PointLight(0xffffff, 0, 100); // White core pulse
-    whiteLight.position.set(0, 0, 0);
-    scene.add(whiteLight);
-
-    // --- 1. THE DARK CORE (Central Sphere) ---
-    const coreGeo = new THREE.IcosahedronGeometry(12, 5); // Smooth high-poly sphere
-    const coreMat = new THREE.MeshStandardMaterial({
-        color: 0x050505, // Almost black
-        metalness: 0.9,
-        roughness: 0.2,
-        flatShading: true // Gives it a slight industrial, faceted edge
-    });
-    const core = new THREE.Mesh(coreGeo, coreMat);
-    scene.add(core);
-
-    // Save original vertices for smooth geometric pulsing
-    const corePositions = coreGeo.attributes.position.clone();
-
-    // --- 2. THE PARTICLE VORTEX ---
-    const particleCount = 40000;
-    const particlesGeo = new THREE.BufferGeometry();
-    const posArray = new Float32Array(particleCount * 3);
-    const colorArray = new Float32Array(particleCount * 3);
-
-    // Generate a soft circular texture for the particles via canvas
+    // --- GENERATE PARTICLE TEXTURE ---
     const canvas = document.createElement('canvas');
     canvas.width = 32; canvas.height = 32;
     const ctx = canvas.getContext('2d');
     const grad = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
     grad.addColorStop(0, 'rgba(255,255,255,1)');
+    grad.addColorStop(0.3, 'rgba(255,255,255,0.8)');
     grad.addColorStop(1, 'rgba(255,255,255,0)');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, 32, 32);
     const particleTexture = new THREE.CanvasTexture(canvas);
 
-    // Build the galaxy rings
+    // --- SETUP AUDIO DATA TEXTURE FOR SHADER ---
+    audioTexture = new THREE.DataTexture(audioData, 256, 1, THREE.LuminanceFormat, THREE.UnsignedByteType);
+    audioTexture.magFilter = THREE.LinearFilter; // Smooth blending between frequencies
+    audioTexture.minFilter = THREE.LinearFilter;
+
+    // --- 60,000 REACTIVE PARTICLES ---
+    const particleCount = 60000;
+    const particlesGeo = new THREE.BufferGeometry();
+    const posArray = new Float32Array(particleCount * 3);
+    const colorArray = new Float32Array(particleCount * 3);
+
     for (let i = 0; i < particleCount; i++) {
-        // Distribute in a disc/torus shape
-        let radius = 15 + Math.random() * 80;
+        // Distribute in a massive disc, packed tighter in the center
+        let radius = 2 + Math.sqrt(Math.random()) * 85; 
         let theta = Math.random() * Math.PI * 2;
-        // Y spread gets thinner further out
-        let ySpread = (Math.random() - 0.5) * (1000 / radius); 
+        let y = (Math.random() - 0.5) * 1.5; 
 
         posArray[i * 3] = Math.cos(theta) * radius;
-        posArray[i * 3 + 1] = ySpread;
+        posArray[i * 3 + 1] = y;
         posArray[i * 3 + 2] = Math.sin(theta) * radius;
 
-        // Assign Colors: Soft Pink, Soft Blue, White
+        // Colors: Soft Pink, Soft Blue, White
         let randColor = Math.random();
         if (randColor < 0.4) {
-            // Soft Pink (255, 182, 193)
-            colorArray[i*3] = 1.0; colorArray[i*3+1] = 0.71; colorArray[i*3+2] = 0.75;
+            colorArray[i*3] = 1.0; colorArray[i*3+1] = 0.6; colorArray[i*3+2] = 0.75; // Soft Pink
         } else if (randColor < 0.8) {
-            // Soft Blue (173, 216, 230)
-            colorArray[i*3] = 0.67; colorArray[i*3+1] = 0.84; colorArray[i*3+2] = 0.90;
+            colorArray[i*3] = 0.5; colorArray[i*3+1] = 0.8; colorArray[i*3+2] = 1.0; // Soft Blue
         } else {
-            // White
-            colorArray[i*3] = 1.0; colorArray[i*3+1] = 1.0; colorArray[i*3+2] = 1.0;
+            colorArray[i*3] = 0.9; colorArray[i*3+1] = 0.9; colorArray[i*3+2] = 1.0; // Soft White
         }
     }
 
     particlesGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
     particlesGeo.setAttribute('color', new THREE.BufferAttribute(colorArray, 3));
 
-    const particlesMat = new THREE.PointsMaterial({
-        size: 0.8,
-        map: particleTexture,
-        transparent: true,
-        opacity: 0.8,
+    // --- CUSTOM GPU SHADER MATERIAL ---
+    const customUniforms = {
+        uTime: { value: 0 },
+        uAudioTex: { value: audioTexture },
+        uPointTex: { value: particleTexture },
+        uBass: { value: 0 },
+        uTreble: { value: 0 }
+    };
+
+    const shaderMaterial = new THREE.ShaderMaterial({
+        uniforms: customUniforms,
         vertexColors: true,
+        transparent: true,
         blending: THREE.AdditiveBlending,
-        depthWrite: false
+        depthWrite: false,
+        vertexShader: `
+            uniform float uTime;
+            uniform sampler2D uAudioTex;
+            uniform float uBass;
+            uniform float uTreble;
+
+            varying vec3 vColor;
+            varying float vAudioIntensity;
+
+            void main() {
+                vColor = color;
+                vec3 pos = position;
+
+                // 1. Map particle distance to audio frequency bin
+                float dist = length(pos.xz);
+                float normalizedDist = clamp((dist - 2.0) / 85.0, 0.0, 1.0);
+                
+                // Read the exact frequency volume for this specific particle
+                // Curve the read so bass covers the middle, treble covers the outside rings
+                float audioVal = texture2D(uAudioTex, vec2(pow(normalizedDist, 0.8), 0.5)).r;
+                vAudioIntensity = audioVal;
+
+                // 2. Physical Audio Displacement
+                // Bass erupts the center vertically
+                float centerLift = exp(-normalizedDist * 5.0) * audioVal * 40.0;
+                
+                // Mids/Treble create cymatic liquid ripples across the rings
+                float ripple = sin(dist * 0.4 - uTime * 6.0) * (audioVal * 15.0 * (1.0 - normalizedDist));
+                
+                pos.y += centerLift + ripple;
+
+                // 3. Audio Shockwave Expansion
+                // Bass physically pushes the particles outward from the center
+                float expansion = 1.0 + (uBass * 0.4 * exp(-normalizedDist * 2.0));
+                pos.x *= expansion;
+                pos.z *= expansion;
+
+                // 4. Vortex Rotation
+                float angle = atan(pos.z, pos.x);
+                float currentRadius = length(pos.xz);
+                
+                // Center spins faster, edges spin slower. Bass speeds it all up.
+                angle += (uTime * 0.2) + (uBass * 1.5) * (1.0 / (normalizedDist + 0.5));
+                
+                pos.x = cos(angle) * currentRadius;
+                pos.z = sin(angle) * currentRadius;
+
+                vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+                
+                // Particle size scales drastically with its audio intensity
+                float pSize = 1.0 + (audioVal * 6.0) + (uTreble * 3.0);
+                gl_PointSize = pSize * (150.0 / -mvPosition.z);
+                
+                gl_Position = projectionMatrix * mvPosition;
+            }
+        `,
+        fragmentShader: `
+            uniform sampler2D uPointTex;
+            varying vec3 vColor;
+            varying float vAudioIntensity;
+
+            void main() {
+                vec4 texColor = texture2D(uPointTex, gl_PointCoord);
+                
+                // Particles glow bright white/core-color when hit by audio
+                vec3 finalColor = mix(vColor, vec3(1.0), vAudioIntensity * 0.6);
+                finalColor *= (0.5 + vAudioIntensity * 2.0);
+                
+                gl_FragColor = vec4(finalColor, texColor.a * (0.3 + vAudioIntensity * 0.7));
+            }
+        `
     });
 
-    const particleSystem = new THREE.Points(particlesGeo, particlesMat);
+    const particleSystem = new THREE.Points(particlesGeo, shaderMaterial);
     
-    // Tilt the vortex for a better cinematic angle
-    particleSystem.rotation.x = 0.2;
-    particleSystem.rotation.z = -0.1;
+    // Tilt the entire system slightly to favor the camera
+    particleSystem.rotation.x = 0.1;
     scene.add(particleSystem);
 
     window.addEventListener('resize', () => {
@@ -236,74 +284,37 @@
 
         const time = clock.getElapsedTime();
 
-        // --- AUDIO PROCESSING ---
+        // 1. Get raw audio data and push it straight to the GPU texture
         analyser.getByteFrequencyData(dataArray);
         
-        let bassSum = 0, midSum = 0, trebleSum = 0;
-        const bassEnd = 15, midEnd = 120, trebleEnd = 255;   
-        
-        // Boost signal internally
-        const audioBoost = 3.0; 
-        
-        for (let i = 0; i < 256; i++) {
-            let val = Math.min(1.0, (dataArray[i] / 255.0) * audioBoost);
-            if (i < bassEnd) bassSum += val;
-            else if (i < midEnd) midSum += val;
-            else if (i < trebleEnd) trebleSum += val;
+        // Boost the raw signal slightly so it reacts well even to quiet music
+        for(let i=0; i<dataArray.length; i++) {
+            audioData[i] = Math.min(255, dataArray[i] * 1.8);
         }
+        audioTexture.needsUpdate = true; // Crucial: Tells GPU to refresh the texture
+
+        // 2. Calculate smooth global envelopes for camera & macro effects
+        let bassSum = 0, trebleSum = 0;
+        for (let i = 0; i < 15; i++) bassSum += (dataArray[i] / 255.0);
+        for (let i = 150; i < 255; i++) trebleSum += (dataArray[i] / 255.0);
         
-        let rawBass = bassSum / bassEnd;
-        let rawMids = midSum / (midEnd - bassEnd);
-        let rawTreble = trebleSum / (trebleEnd - midEnd);
+        let rawBass = bassSum / 15;
+        let rawTreble = trebleSum / 105;
 
-        // APPLY ENVELOPE SMOOTHING (Kills the jitter)
-        envBass = smoothAudio(envBass, rawBass);
-        envMids = smoothAudio(envMids, rawMids);
-        envTreble = smoothAudio(envTreble, rawTreble);
+        envBass = smoothAudio(envBass, rawBass * 1.5);
+        envTreble = smoothAudio(envTreble, rawTreble * 1.5);
 
-        // --- APPLY TO VISUALS ---
+        // Update Shader Uniforms
+        customUniforms.uTime.value = time;
+        customUniforms.uBass.value = envBass;
+        customUniforms.uTreble.value = envTreble;
 
-        // 1. Lighting Pulses (Driven by Bass & Treble)
-        pinkLight.intensity = envBass * 5;
-        blueLight.intensity = envBass * 5;
-        whiteLight.intensity = envTreble * 3;
-
-        // 2. Core Breathing & Deformation
-        // The sphere expands with the bass, creating a heartbeat effect
-        let coreScale = 1.0 + (envBass * 0.3);
-        core.scale.set(coreScale, coreScale, coreScale);
-        
-        // Slowly rotate the core
-        core.rotation.y = time * 0.2;
-        core.rotation.x = time * 0.1;
-
-        // Smoothly displace the core's vertices based on mids
-        const pos = core.geometry.attributes.position;
-        for (let i = 0; i < pos.count; i++) {
-            let p = new THREE.Vector3().fromBufferAttribute(corePositions, i);
-            
-            // Generate a slow, smooth wave
-            let wave = Math.sin(p.x * 0.5 + time) * Math.cos(p.z * 0.5 + time);
-            
-            // Mids push the vertices out, creating smooth ridges
-            p.multiplyScalar(1.0 + (wave * envMids * 0.15));
-            pos.setXYZ(i, p.x, p.y, p.z);
-        }
-        pos.needsUpdate = true;
-        core.geometry.computeVertexNormals(); // Keeps shading smooth
-
-        // 3. Particle Vortex Dynamics
-        // Base rotation + extra speed from Mids
-        particleSystem.rotation.y = (time * 0.05) + (envMids * 0.5);
-        
-        // Treble brightens and slightly enlarges the particles
-        particlesMat.size = 0.6 + (envTreble * 1.5);
-        particlesMat.opacity = 0.5 + (envTreble * 0.5);
-
-        // 4. Cinematic Camera Drift
-        camera.position.x = Math.sin(time * 0.1) * 15;
-        camera.position.y = 15 + Math.sin(time * 0.2) * 5;
-        camera.lookAt(0, 0, 0);
+        // Cinematic Camera Pan
+        camera.position.x = Math.sin(time * 0.2) * 20;
+        camera.position.z = 70 + Math.cos(time * 0.15) * 15;
+        // Bass drops lower the camera into the particle field
+        camera.position.y = 40 - (envBass * 15); 
+        camera.lookAt(0, 5, 0);
 
         renderer.render(scene, camera);
     }
