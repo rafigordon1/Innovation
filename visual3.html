@@ -80,7 +80,8 @@
             analyser = audioContext.createAnalyser();
             
             analyser.fftSize = 512;
-            analyser.smoothingTimeConstant = 0.7; // Lower smoothing for punchier visual strikes
+            // Slightly reduced smoothing for a more sensitive, punchier reaction to the beat
+            analyser.smoothingTimeConstant = 0.65; 
             
             source.connect(analyser);
             dataArray = new Uint8Array(analyser.frequencyBinCount);
@@ -205,22 +206,20 @@
                 float normalizedDist = clamp((dist - 2.0) / 85.0, 0.0, 1.0);
                 
                 // Read the exact frequency volume for this specific particle
-                // Curve the read so bass covers the middle, treble covers the outside rings
                 float audioVal = texture2D(uAudioTex, vec2(pow(normalizedDist, 0.8), 0.5)).r;
                 vAudioIntensity = audioVal;
 
-                // 2. Physical Audio Displacement
-                // Bass erupts the center vertically
-                float centerLift = exp(-normalizedDist * 5.0) * audioVal * 40.0;
+                // 2. Physical Audio Displacement (Sensitivity increased)
+                // Bass erupts the center vertically (Multipliers boosted for higher sensitivity)
+                float centerLift = exp(-normalizedDist * 5.0) * audioVal * 50.0; 
                 
                 // Mids/Treble create cymatic liquid ripples across the rings
-                float ripple = sin(dist * 0.4 - uTime * 6.0) * (audioVal * 15.0 * (1.0 - normalizedDist));
+                float ripple = sin(dist * 0.4 - uTime * 6.0) * (audioVal * 20.0 * (1.0 - normalizedDist));
                 
                 pos.y += centerLift + ripple;
 
                 // 3. Audio Shockwave Expansion
-                // Bass physically pushes the particles outward from the center
-                float expansion = 1.0 + (uBass * 0.4 * exp(-normalizedDist * 2.0));
+                float expansion = 1.0 + (uBass * 0.5 * exp(-normalizedDist * 2.0));
                 pos.x *= expansion;
                 pos.z *= expansion;
 
@@ -228,7 +227,6 @@
                 float angle = atan(pos.z, pos.x);
                 float currentRadius = length(pos.xz);
                 
-                // Center spins faster, edges spin slower. Bass speeds it all up.
                 angle += (uTime * 0.2) + (uBass * 1.5) * (1.0 / (normalizedDist + 0.5));
                 
                 pos.x = cos(angle) * currentRadius;
@@ -237,7 +235,7 @@
                 vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
                 
                 // Particle size scales drastically with its audio intensity
-                float pSize = 1.0 + (audioVal * 6.0) + (uTreble * 3.0);
+                float pSize = 1.0 + (audioVal * 7.0) + (uTreble * 4.0);
                 gl_PointSize = pSize * (150.0 / -mvPosition.z);
                 
                 gl_Position = projectionMatrix * mvPosition;
@@ -253,7 +251,7 @@
                 
                 // Particles glow bright white/core-color when hit by audio
                 vec3 finalColor = mix(vColor, vec3(1.0), vAudioIntensity * 0.6);
-                finalColor *= (0.5 + vAudioIntensity * 2.0);
+                finalColor *= (0.5 + vAudioIntensity * 2.2);
                 
                 gl_FragColor = vec4(finalColor, texColor.a * (0.3 + vAudioIntensity * 0.7));
             }
@@ -287,9 +285,10 @@
         // 1. Get raw audio data and push it straight to the GPU texture
         analyser.getByteFrequencyData(dataArray);
         
-        // Boost the raw signal slightly so it reacts well even to quiet music
+        // SENSITIVITY BOOST: Increased multiplier from 1.8 to 2.2
+        // This ensures even quieter sounds create noticeable physical displacement
         for(let i=0; i<dataArray.length; i++) {
-            audioData[i] = Math.min(255, dataArray[i] * 1.8);
+            audioData[i] = Math.min(255, dataArray[i] * 2.2);
         }
         audioTexture.needsUpdate = true; // Crucial: Tells GPU to refresh the texture
 
@@ -301,8 +300,9 @@
         let rawBass = bassSum / 15;
         let rawTreble = trebleSum / 105;
 
-        envBass = smoothAudio(envBass, rawBass * 1.5);
-        envTreble = smoothAudio(envTreble, rawTreble * 1.5);
+        // Macro envelopes boosted for slightly stronger global reactions
+        envBass = smoothAudio(envBass, rawBass * 1.8);
+        envTreble = smoothAudio(envTreble, rawTreble * 1.8);
 
         // Update Shader Uniforms
         customUniforms.uTime.value = time;
@@ -312,8 +312,8 @@
         // Cinematic Camera Pan
         camera.position.x = Math.sin(time * 0.2) * 20;
         camera.position.z = 70 + Math.cos(time * 0.15) * 15;
-        // Bass drops lower the camera into the particle field
-        camera.position.y = 40 - (envBass * 15); 
+        // Bass drops lower the camera deeper into the particle field
+        camera.position.y = 40 - (envBass * 18); 
         camera.lookAt(0, 5, 0);
 
         renderer.render(scene, camera);
