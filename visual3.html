@@ -13,7 +13,7 @@
             overflow: hidden;
             background-color: #000;
             font-family: 'Courier New', Courier, monospace;
-            cursor: pointer; /* Suggests clicking to init audio if blocked */
+            cursor: pointer;
         }
         canvas {
             display: block;
@@ -27,24 +27,24 @@
         #init-overlay {
             position: absolute;
             z-index: 10;
-            color: rgba(255, 255, 255, 0.4);
+            color: rgba(255, 255, 255, 0.6);
             display: flex;
             justify-content: center;
             align-items: center;
             width: 100%;
             height: 100%;
+            background: rgba(0,0,0,0.8);
             pointer-events: none;
-            font-size: 14px;
+            font-size: 16px;
             letter-spacing: 2px;
             text-transform: uppercase;
-            transition: opacity 2s ease;
+            transition: opacity 1s ease;
         }
-        body { transition: opacity 2s ease-in-out; }
     </style>
 </head>
 <body>
 
-<div id="init-overlay">[ Waiting for Audio Context - Click if paused ]</div>
+<div id="init-overlay">[ WAITING FOR AUDIO - CLICK ANYWHERE TO START ]</div>
 <canvas id="webgl-canvas"></canvas>
 
 <script>
@@ -62,9 +62,7 @@
     // --- AUDIO INIT ---
     async function initAudio() {
         if (audioInitialized) {
-            if (audioContext.state === 'suspended') {
-                await audioContext.resume();
-            }
+            if (audioContext.state === 'suspended') await audioContext.resume();
             return;
         }
         try {
@@ -73,11 +71,8 @@
             const source = audioContext.createMediaStreamSource(stream);
             analyser = audioContext.createAnalyser();
             
-            // 512 bins for detailed frequency isolation
             analyser.fftSize = 512;
-            
-            // Extreme hardware smoothing to prevent flashing/stuttering
-            analyser.smoothingTimeConstant = 0.92; 
+            analyser.smoothingTimeConstant = 0.85; // Slightly less smoothing for punchier reactions
             
             source.connect(analyser);
             dataArray = new Uint8Array(analyser.frequencyBinCount);
@@ -90,11 +85,11 @@
                 requestAnimationFrame(render);
             }
         } catch (err) {
-            console.warn("Microphone access pending or denied.", err);
+            console.warn("Microphone access denied.", err);
+            document.getElementById('init-overlay').innerText = "[ MICROPHONE ACCESS DENIED ]";
         }
     }
     
-    // Auto-init on load, fallback to click if browser blocks it
     window.addEventListener('load', initAudio);
     window.addEventListener('click', () => {
         initAudio();
@@ -105,7 +100,6 @@
         }
     });
 
-    // Spacebar to navigate back
     window.addEventListener('keydown', (e) => {
         if (e.key === ' ') {
             document.body.style.opacity = 0;
@@ -113,7 +107,7 @@
         }
     });
 
-    // --- WEBGL HYPNOTIC FRACTAL SHADER ---
+    // --- WEBGL SHADER ---
     const glCanvas = document.getElementById('webgl-canvas');
     const gl = glCanvas.getContext('webgl', { alpha: false, antialias: false });
 
@@ -126,14 +120,11 @@
         precision highp float;
         uniform vec2 u_resolution;
         uniform float u_time;
-        uniform float u_audio; // Overall energy
+        uniform float u_audio;
         
-        // FFT Driven Params
         uniform float u_hueSpeed;
         uniform float u_zoom;
-        uniform float u_density;
         uniform float u_deform;
-        uniform float u_fog;
         uniform float u_spin;
         uniform float u_glitch;
 
@@ -145,64 +136,65 @@
         vec2 map(vec3 p) {
             vec3 z = p;
             
-            // Bass drives the forward momentum
+            // Forward movement driven heavily by bass
             z.z -= u_time * u_zoom;
             
-            // Treble drives a very subtle chromatic spatial twist
-            z.xy *= rot(z.z * u_glitch * 0.02 + sin(u_time * 0.3) * 0.02);
+            // Save xy coordinate to carve out a protective tunnel for the camera
+            vec2 core = z.xy;
             
-            // Grid Repetition driven by Mids
-            float grid = 5.0 - u_density; 
+            // Treble twists the whole tunnel
+            z.xy *= rot(z.z * u_glitch * 0.05 + sin(u_time * 0.5) * 0.05);
+            
+            // Infinite grid repetition
+            float grid = 4.0; 
             z = mod(z + grid/2.0, grid) - grid/2.0;
             
             float scale = 1.0;
-            float iterCount = 0.0;
             
-            // Mids drive the rotation
-            float foldAngle1 = (u_time * 0.08) * u_spin + (u_deform * 0.15);
-            float foldAngle2 = (u_time * 0.04) * u_spin - (u_deform * 0.08);
+            // Mids drive rotation of the fractal
+            float foldAngle1 = (u_time * 0.2) * u_spin + u_deform;
+            float foldAngle2 = (u_time * 0.1) * u_spin - u_deform;
             
-            // 5 Iterations for a soft, ambient geometry
-            for(int i = 0; i < 5; i++) { 
-                // Bass (u_deform) gently swells the void spaces
-                z = abs(z) - vec3(0.6 + u_deform * 0.1, 0.5, 0.4);
-                
-                z.xy *= rot(foldAngle1 + float(i) * 0.15);
+            // Stable KIFS Fractal Loop
+            for(int i = 0; i < 4; i++) { 
+                z = abs(z) - vec3(0.5 + u_deform * 0.2, 0.4, 0.3);
+                z.xy *= rot(foldAngle1 + float(i));
                 z.xz *= rot(foldAngle2);
                 
                 float k = 1.5;
                 z *= k;
                 scale *= k;
-                
-                iterCount += 1.0;
             }
             
-            vec3 d = abs(z) - vec3(1.0);
-            float dist = (min(max(d.x, max(d.y, d.z)), 0.0) + length(max(d, 0.0))) / scale;
+            // Use spherical primitive for absolute distance stability
+            float dist = length(z) / scale;
             
-            return vec2(dist, iterCount);
+            // FOOLPROOF CAMERA PROTECTION: Carve a hollow cylinder down the Z axis.
+            // This ensures distance is never negative at the camera origin, stopping the black screen bug.
+            float tube = length(core) - (0.6 + u_audio * 0.4); 
+            dist = max(dist, -tube);
+            
+            return vec2(dist, 1.0);
         }
 
         vec3 getNeonColor(vec3 p) {
-            // Treble drives how fast the colors morph across the space
-            float colorSeed = fract(p.x * 0.1 + p.z * 0.1 + u_time * u_hueSpeed * 0.15);
+            float colorSeed = fract(p.x * 0.1 + p.z * 0.1 + u_time * u_hueSpeed * 0.3);
             
-            if (colorSeed < 0.4) {
-                return vec3(0.9, 0.4, 0.6); // Deep Soft Pink
-            } else if (colorSeed < 0.8) {
-                return vec3(0.3, 0.6, 0.9); // Deep Soft Blue
+            // Strictly Soft Pink, Soft Blue, White
+            if (colorSeed < 0.33) {
+                return vec3(1.0, 0.6, 0.75); // Soft Pink
+            } else if (colorSeed < 0.66) {
+                return vec3(0.5, 0.8, 1.0); // Soft Blue
             } else {
-                return vec3(0.7, 0.7, 0.8); // Dimmed White/Grey
+                return vec3(0.9, 0.9, 1.0); // White
             }
         }
 
         void main() {
             vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / u_resolution.y;
             
-            // Subtle aberration tied to Treble
-            float split = u_glitch * 0.004;
-            
-            vec3 ro = vec3(0.0, 0.0, -2.5); 
+            float split = u_glitch * 0.01; // Chromatic aberration
+            vec3 ro = vec3(0.0, 0.0, -1.0); // Camera origin safely inside the carved tube
             vec3 col = vec3(0.0);
             
             for (int c = 0; c < 3; c++) {
@@ -217,29 +209,26 @@
                 vec2 res;
                 vec3 p;
                 
-                for(int i = 0; i < 60; i++) {
+                for(int i = 0; i < 70; i++) {
                     p = ro + rd * t;
                     res = map(p);
                     
-                    if(res.x < 0.002 || t > 15.0) break;
+                    if(res.x < 0.002 || t > 18.0) break;
                     
-                    // Smooth, breathing glow instead of bright flashes
-                    accumulatedGlow += (0.01 / (0.02 + res.x * res.x));
-                    
-                    t += res.x * 0.85; 
+                    // Add volumetric glow when rays pass close to surfaces
+                    accumulatedGlow += (0.01 / (0.01 + res.x * res.x));
+                    t += res.x * 0.6; // Safe stepping to prevent clipping inside walls
                 }
                 
-                if(t < 15.0) {
-                    // Deep fog
-                    float fog = exp(-u_fog * t * t * 0.5); 
-                    
+                if(t < 18.0) {
+                    float fog = exp(-0.03 * t * t); // Fog depth
                     vec3 neon = getNeonColor(p);
                     
-                    float structLight = max(0.0, 1.0 - res.y * 0.1);
-                    vec3 baseCol = vec3(0.02) * structLight; // Very dark base metal
+                    // Dark base material with bright neon highlights
+                    vec3 baseCol = vec3(0.02); 
                     
-                    // Overall audio energy modulates the volumetric glow smoothly
-                    float smoothGlow = accumulatedGlow * (0.02 + u_audio * 0.06);
+                    // Glow heavily multipliers by audio energy
+                    float smoothGlow = accumulatedGlow * (0.05 + u_audio * 0.15);
                     baseCol += neon * smoothGlow;
                     
                     if (c == 0) col.r = (baseCol * fog).r;
@@ -248,9 +237,7 @@
                 }
             }
             
-            // Soft cinematic vignette
-            col *= 1.0 - dot(uv, uv) * 0.6;
-            
+            col *= 1.0 - dot(uv, uv) * 0.7; // Heavy basement vignette
             gl_FragColor = vec4(col, 1.0);
         }
     `;
@@ -281,9 +268,7 @@
         audio: gl.getUniformLocation(program, "u_audio"),
         hueSpeed: gl.getUniformLocation(program, "u_hueSpeed"),
         zoom: gl.getUniformLocation(program, "u_zoom"),
-        density: gl.getUniformLocation(program, "u_density"),
         deform: gl.getUniformLocation(program, "u_deform"),
-        fog: gl.getUniformLocation(program, "u_fog"),
         spin: gl.getUniformLocation(program, "u_spin"),
         glitch: gl.getUniformLocation(program, "u_glitch")
     };
@@ -303,68 +288,52 @@
         
         analyser.getByteFrequencyData(dataArray);
         
-        // --- FFT FREQUENCY BANDS ---
         let bassSum = 0, midSum = 0, trebleSum = 0, totalSum = 0;
         
-        // Define ranges for 256 bins (analyser.frequencyBinCount)
-        const bassEnd = 10;      // Low frequencies
-        const midEnd = 120;      // Mid frequencies
-        const trebleEnd = 250;   // High frequencies
+        const bassEnd = 15;      
+        const midEnd = 120;      
+        const trebleEnd = 255;   
+        
+        // SIGNAL BOOSTER: Multiply raw mic signal to force reactivity even on quiet inputs
+        const audioMultiplier = 3.5; 
         
         for (let i = 0; i < 256; i++) {
-            let val = dataArray[i] / 255.0;
+            // Read and boost signal, capping at 1.0 to prevent blowout
+            let val = Math.min(1.0, (dataArray[i] / 255.0) * audioMultiplier);
             totalSum += val;
             
-            if (i < bassEnd) {
-                bassSum += val;
-            } else if (i < midEnd) {
-                midSum += val;
-            } else if (i < trebleEnd) {
-                trebleSum += val;
-            }
+            if (i < bassEnd) bassSum += val;
+            else if (i < midEnd) midSum += val;
+            else if (i < trebleEnd) trebleSum += val;
         }
         
-        // Calculate raw averages
         let rawBass = bassSum / bassEnd;
         let rawMids = midSum / (midEnd - bassEnd);
         let rawTreble = trebleSum / (trebleEnd - midEnd);
         let rawEnergy = totalSum / 256;
 
-        // --- SOFTWARE SMOOTHING ---
-        // Apply secondary smoothing in JS for highly hypnotic, liquid movement
-        smoothedBass = smoothedBass * 0.9 + rawBass * 0.1;
-        smoothedMids = smoothedMids * 0.9 + rawMids * 0.1;
-        smoothedTreble = smoothedTreble * 0.9 + rawTreble * 0.1;
-        smoothedEnergy = smoothedEnergy * 0.9 + rawEnergy * 0.1;
+        // Smooth output to keep motion fluid, not jittery
+        smoothedBass = smoothedBass * 0.8 + rawBass * 0.2;
+        smoothedMids = smoothedMids * 0.8 + rawMids * 0.2;
+        smoothedTreble = smoothedTreble * 0.8 + rawTreble * 0.2;
+        smoothedEnergy = smoothedEnergy * 0.8 + rawEnergy * 0.2;
 
-        // --- DYNAMIC FFT PARAMETER MAPPING ---
-        // Base values + Audio influence
+        // --- EXAGGERATED FFT MAPPING ---
+        let dynHueSpeed = 0.2 + (smoothedTreble * 1.5);
+        let dynGlitch   = smoothedTreble * 2.0;       // Treble warps screen edges
         
-        // Treble drives color morph speed and chromatic edges
-        let dynHueSpeed = 0.5 + (smoothedTreble * 2.0);
-        let dynGlitch   = smoothedTreble * 1.5;
+        let dynZoom     = 1.0 + (smoothedBass * 6.0); // Bass violently pushes tunnel forward
+        let dynDeform   = smoothedBass * 3.0;         // Bass swells geometry heavily
         
-        // Bass drives forward velocity and geometric swelling
-        let dynZoom     = 0.2 + (smoothedBass * 1.2);
-        let dynDeform   = smoothedBass * 2.5;
-        
-        // Mids drive rotation and structural complexity
-        let dynSpin     = 0.5 + (smoothedMids * 1.5);
-        let dynDensity  = 0.0 + (smoothedMids * 1.2);
-        
-        // Energy drives fog depth (heavy bass lifts the fog slightly)
-        let dynFog      = 0.12 - (smoothedEnergy * 0.04);
+        let dynSpin     = 0.5 + (smoothedMids * 4.0); // Mids cause aggressive rotation
 
-        // --- SHADER UNIFORMS ---
         gl.uniform2f(uniforms.res, glCanvas.width, glCanvas.height);
         gl.uniform1f(uniforms.time, time * 0.001);
         gl.uniform1f(uniforms.audio, smoothedEnergy);
         
         gl.uniform1f(uniforms.hueSpeed, dynHueSpeed);
         gl.uniform1f(uniforms.zoom, dynZoom);
-        gl.uniform1f(uniforms.density, dynDensity);
         gl.uniform1f(uniforms.deform, dynDeform);
-        gl.uniform1f(uniforms.fog, dynFog);
         gl.uniform1f(uniforms.spin, dynSpin);
         gl.uniform1f(uniforms.glitch, dynGlitch);
         
