@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Audioactive Visualizer - The KIFS Matrix</title>
+    <title>Audioactive Visualizer - Hypnotic KIFS Cavern</title>
     <style>
         body, html {
             margin: 0;
@@ -36,20 +36,16 @@
     let smoothedEnergy = 0;
     let isRunning = false;
     let audioInitialized = false;
-    
-    let lastTapTime = 0;
-    let bpmInterval = 500; 
-    let beatTrigger = 0;
 
     // Advanced Rate of Change Engine (Delta in ms)
     const keyState = {
-        '1': { lastPress: 0, delta: 3000 }, // Hue / Color Cycling Speed
-        '2': { lastPress: 0, delta: 3000 }, // Forward Velocity (Zoom)
-        '3': { lastPress: 0, delta: 3000 }, // Fractal Iteration Density
-        '4': { lastPress: 0, delta: 3000 }, // Audio Deformation (Fractal tearing)
-        '5': { lastPress: 0, delta: 3000 }, // Shadow / Void Depth (Fog)
-        '6': { lastPress: 0, delta: 3000 }, // Fractal Spin & Rotation
-        'ArrowLeft': { lastPress: 0, delta: 3000 } // Chromatic Glitch & Twist
+        '1': { lastPress: 0, delta: 3000 }, // Hue Shift
+        '2': { lastPress: 0, delta: 3000 }, // Forward Velocity
+        '3': { lastPress: 0, delta: 3000 }, // Grid Spacing
+        '4': { lastPress: 0, delta: 3000 }, // Audio Swell (Deform)
+        '5': { lastPress: 0, delta: 3000 }, // Fog Density
+        '6': { lastPress: 0, delta: 3000 }, // Gentle Spin
+        'ArrowLeft': { lastPress: 0, delta: 3000 } // Subtle Chromatic Shift
     };
 
     // --- AUDIO INIT ---
@@ -61,7 +57,8 @@
             const source = audioContext.createMediaStreamSource(stream);
             analyser = audioContext.createAnalyser();
             analyser.fftSize = 512;
-            analyser.smoothingTimeConstant = 0.8; 
+            // Extremely high smoothing (0.92) to prevent flashing/twitching
+            analyser.smoothingTimeConstant = 0.92; 
             source.connect(analyser);
             dataArray = new Uint8Array(analyser.frequencyBinCount);
             
@@ -82,17 +79,14 @@
         const state = keyState[key];
         if (state.lastPress > 0) {
             let d = now - state.lastPress;
-            // Hyper-responsive weighting for rapid visual changes
-            if (d < 4000) state.delta = (state.delta * 0.1) + (d * 0.9); 
+            if (d < 4000) state.delta = (state.delta * 0.2) + (d * 0.8); 
         }
         state.lastPress = now;
     }
 
-    // Power curve mapping for extreme visual ranges
     function mapDelta(delta, fastVal, slowVal) {
-        let clamped = Math.max(50, Math.min(3000, delta));
-        let t = (clamped - 50) / (2950); 
-        t = Math.pow(t, 1.2); 
+        let clamped = Math.max(100, Math.min(3000, delta));
+        let t = (clamped - 100) / (2900); 
         return fastVal + t * (slowVal - fastVal);
     }
 
@@ -108,20 +102,13 @@
 
         if (keyState[e.key] !== undefined) {
             updateRate(e.key);
-        } else if (e.key === 'ArrowRight') {
-            const now = performance.now();
-            if (lastTapTime > 0 && (now - lastTapTime) < 2000) {
-                bpmInterval = now - lastTapTime;
-            }
-            lastTapTime = now;
-            beatTrigger = 1.0; // Flash intensity spike
         } else if (e.key === ' ') {
             document.body.style.opacity = 0;
             setTimeout(() => window.location.href = 'index.html', 2000);
         }
     });
 
-    // --- WEBGL FRACTAL SHADER ---
+    // --- WEBGL HYPNOTIC FRACTAL SHADER ---
     const glCanvas = document.getElementById('webgl-canvas');
     const gl = glCanvas.getContext('webgl', { alpha: false, antialias: false });
 
@@ -135,7 +122,6 @@
         uniform vec2 u_resolution;
         uniform float u_time;
         uniform float u_audio;
-        uniform float u_beat;
         
         // Dynamic Params
         uniform float u_hueSpeed;
@@ -151,78 +137,72 @@
             return mat2(c, -s, s, c);
         }
 
-        // Kaleidoscopic Distance Estimator
         vec2 map(vec3 p) {
             vec3 z = p;
             
-            // Forward Motion
-            z.z -= u_time * u_zoom;
+            // Slow, creeping forward motion
+            z.z -= u_time * (0.2 + u_zoom);
             
-            // Spatial Twist (Glitch)
-            z.xy *= rot(z.z * u_glitch * 0.1 + sin(u_time) * u_glitch * 0.05);
+            // Very gentle spatial twist
+            z.xy *= rot(z.z * u_glitch * 0.02 + sin(u_time * 0.5) * 0.02);
             
-            // Infinite Grid Repetition
-            float grid = 4.0 - (u_density * 2.0); // Density makes the space tighter
+            // Infinite Grid Repetition (spaced out so it feels massive, not cluttered)
+            float grid = 5.0 - u_density; 
             z = mod(z + grid/2.0, grid) - grid/2.0;
             
             float scale = 1.0;
             float iterCount = 0.0;
             
-            // The audio violently manipulates the folding angles
-            float foldAngle1 = u_time * u_spin + (u_audio * u_deform * 0.5);
-            float foldAngle2 = u_time * u_spin * 0.7 - (u_audio * u_deform * 0.3);
+            // Smooth, fluid folding angles
+            float foldAngle1 = (u_time * 0.1) * u_spin + (u_audio * u_deform * 0.2);
+            float foldAngle2 = (u_time * 0.05) * u_spin - (u_audio * u_deform * 0.1);
             
-            for(int i = 0; i < 6; i++) {
-                // Folding space
-                z = abs(z) - vec3(0.5 + u_audio * u_deform * 0.2, 0.4, 0.3 + u_beat * 0.2);
+            for(int i = 0; i < 5; i++) { // Reduced iterations for softer geometry
+                // Audio gently swells the void spaces rather than tearing them
+                z = abs(z) - vec3(0.6 + u_audio * u_deform * 0.1, 0.5, 0.4);
                 
-                // Rotation
-                z.xy *= rot(foldAngle1 + float(i) * 0.2);
+                z.xy *= rot(foldAngle1 + float(i) * 0.15);
                 z.xz *= rot(foldAngle2);
                 
-                // Scaling
-                float k = 1.6 + (u_audio * 0.1 * u_deform);
+                float k = 1.5;
                 z *= k;
                 scale *= k;
                 
                 iterCount += 1.0;
             }
             
-            // Box primitive forming the fractal structure
             vec3 d = abs(z) - vec3(1.0);
             float dist = (min(max(d.x, max(d.y, d.z)), 0.0) + length(max(d, 0.0))) / scale;
             
-            return vec2(dist, iterCount); // Return distance and orbit trap for color
+            return vec2(dist, iterCount);
         }
 
         vec3 getNeonColor(vec3 p) {
-            // Morph between Soft Pink, Soft Blue, and White
-            float colorSeed = fract(p.x * 0.2 + p.z * 0.2 + u_time * u_hueSpeed);
+            float colorSeed = fract(p.x * 0.1 + p.z * 0.1 + u_time * u_hueSpeed * 0.2);
             
-            if (colorSeed < 0.33) {
-                return vec3(1.0, 0.6, 0.75); // Soft Pink
-            } else if (colorSeed < 0.66) {
-                return vec3(0.5, 0.8, 1.0); // Soft Blue
+            // Deeper, richer tones of soft pink and blue. Reduced pure white.
+            if (colorSeed < 0.4) {
+                return vec3(0.9, 0.4, 0.6); // Deep Soft Pink
+            } else if (colorSeed < 0.8) {
+                return vec3(0.3, 0.6, 0.9); // Deep Soft Blue
             } else {
-                return vec3(0.9, 0.9, 1.0); // Soft White
+                return vec3(0.7, 0.7, 0.8); // Dimmed White/Grey
             }
         }
 
         void main() {
             vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / u_resolution.y;
             
-            // Chromatic Aberration base
-            float split = u_glitch * (0.005 + u_audio * 0.02);
+            // Subtle aberration
+            float split = u_glitch * 0.003;
             
-            vec3 ro = vec3(0.0, 0.0, -2.5); // Camera origin
-            
+            vec3 ro = vec3(0.0, 0.0, -2.5); 
             vec3 col = vec3(0.0);
             
-            // Render Pass (incorporating RGB split for heavy glitch effect)
             for (int c = 0; c < 3; c++) {
                 vec2 suv = uv;
-                if (c == 0) suv.x -= split; // Red channel shift
-                if (c == 2) suv.x += split; // Blue channel shift
+                if (c == 0) suv.x -= split; 
+                if (c == 2) suv.x += split; 
                 
                 vec3 rd = normalize(vec3(suv, 1.0));
                 
@@ -231,30 +211,30 @@
                 vec2 res;
                 vec3 p;
                 
-                // Raymarching Loop
-                for(int i = 0; i < 70; i++) {
+                for(int i = 0; i < 60; i++) {
                     p = ro + rd * t;
                     res = map(p);
                     
-                    if(res.x < 0.001 || t > 12.0) break;
+                    if(res.x < 0.002 || t > 15.0) break;
                     
-                    // Volumetric Glow accumulation based on proximity to surfaces
-                    accumulatedGlow += (0.015 / (0.01 + res.x * res.x)) * (1.0 + u_audio * 2.0);
+                    // Smooth, breathing glow instead of bright flashes
+                    accumulatedGlow += (0.01 / (0.02 + res.x * res.x));
                     
-                    t += res.x * 0.8; // Step size (slightly reduced to avoid missing fine details)
+                    t += res.x * 0.85; 
                 }
                 
-                if(t < 12.0) {
-                    float fog = exp(-u_fog * t * t); // Deep industrial fog
+                if(t < 15.0) {
+                    // Heavy, oppressive fog to hide jarring details
+                    float fog = exp(-u_fog * t * t * 0.5); 
                     
                     vec3 neon = getNeonColor(p);
                     
-                    // The structure itself is dark/metallic, the glow provides the light
                     float structLight = max(0.0, 1.0 - res.y * 0.1);
-                    vec3 baseCol = vec3(0.05) * structLight;
+                    vec3 baseCol = vec3(0.02) * structLight; // Very dark base metal
                     
-                    baseCol += neon * accumulatedGlow * 0.05;
-                    baseCol += neon * u_beat * 0.5; // Flash on beat
+                    // Audio modulates the volumetric glow smoothly
+                    float smoothGlow = accumulatedGlow * (0.02 + u_audio * 0.05);
+                    baseCol += neon * smoothGlow;
                     
                     if (c == 0) col.r = (baseCol * fog).r;
                     else if (c == 1) col.g = (baseCol * fog).g;
@@ -262,8 +242,8 @@
                 }
             }
             
-            // Heavy Vignette for basement projector feel
-            col *= 1.0 - dot(uv, uv) * 0.7;
+            // Soft cinematic vignette
+            col *= 1.0 - dot(uv, uv) * 0.6;
             
             gl_FragColor = vec4(col, 1.0);
         }
@@ -293,7 +273,6 @@
         res: gl.getUniformLocation(program, "u_resolution"),
         time: gl.getUniformLocation(program, "u_time"),
         audio: gl.getUniformLocation(program, "u_audio"),
-        beat: gl.getUniformLocation(program, "u_beat"),
         hueSpeed: gl.getUniformLocation(program, "u_hueSpeed"),
         zoom: gl.getUniformLocation(program, "u_zoom"),
         density: gl.getUniformLocation(program, "u_density"),
@@ -320,25 +299,21 @@
         let sum = 0;
         for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
         let rawEnergy = sum / dataArray.length / 255;
-        smoothedEnergy = smoothedEnergy * 0.8 + rawEnergy * 0.2;
+        // Exceptionally smooth interpolation
+        smoothedEnergy = smoothedEnergy * 0.9 + rawEnergy * 0.1;
 
-        // Auto Beat Detection fallback
-        if (beatTrigger > 0) beatTrigger -= 0.05;
-        if (rawEnergy > 0.6 && beatTrigger <= 0) beatTrigger = 1.0;
-
-        // Extreme bounds mapping based on key deltas
-        let dynHueSpeed = mapDelta(keyState['1'].delta, 3.0, 0.05);   // Fast flash vs glacial morph
-        let dynZoom     = mapDelta(keyState['2'].delta, 10.0, 0.5);   // Hyperdrive vs floating
-        let dynDensity  = mapDelta(keyState['3'].delta, 1.5, 0.0);    // Dense claustrophobia vs vast open voids
-        let dynDeform   = mapDelta(keyState['4'].delta, 5.0, 0.0);    // Violent ripping vs rigid structure
-        let dynFog      = mapDelta(keyState['5'].delta, 0.2, 0.02);   // Pitch black vs full visibility
-        let dynSpin     = mapDelta(keyState['6'].delta, 2.5, 0.05);   // Dizzying rotation vs subtle turning
-        let dynGlitch   = mapDelta(keyState['ArrowLeft'].delta, 3.0, 0.0); // Heavy Chromatic tear vs pristine lens
+        // Capped, elegant parameter ranges (No chaotic extremes)
+        let dynHueSpeed = mapDelta(keyState['1'].delta, 1.0, 0.05);   // Smooth morph
+        let dynZoom     = mapDelta(keyState['2'].delta, 2.5, 0.1);    // Gentle float
+        let dynDensity  = mapDelta(keyState['3'].delta, 1.0, 0.0);    // Moderate spacing
+        let dynDeform   = mapDelta(keyState['4'].delta, 1.5, 0.0);    // Soft structural breathing
+        let dynFog      = mapDelta(keyState['5'].delta, 0.15, 0.05);  // Always dark and deep
+        let dynSpin     = mapDelta(keyState['6'].delta, 1.0, 0.1);    // Hypnotic turning
+        let dynGlitch   = mapDelta(keyState['ArrowLeft'].delta, 1.0, 0.0); // Very mild edge split
 
         gl.uniform2f(uniforms.res, glCanvas.width, glCanvas.height);
         gl.uniform1f(uniforms.time, time * 0.001);
         gl.uniform1f(uniforms.audio, smoothedEnergy);
-        gl.uniform1f(uniforms.beat, Math.max(0, beatTrigger));
         
         gl.uniform1f(uniforms.hueSpeed, dynHueSpeed);
         gl.uniform1f(uniforms.zoom, dynZoom);
