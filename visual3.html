@@ -3,7 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Audioactive Visualizer - Autonomous FFT Cavern</title>
+    <title>Audioactive Visualizer - Magnetic Reactor</title>
+    <!-- Import Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
         body, html {
             margin: 0;
@@ -11,7 +13,7 @@
             width: 100%;
             height: 100%;
             overflow: hidden;
-            background-color: #000;
+            background-color: #030303;
             font-family: 'Courier New', Courier, monospace;
             cursor: pointer;
         }
@@ -20,14 +22,12 @@
             position: absolute;
             top: 0;
             left: 0;
-            width: 100%;
-            height: 100%;
             z-index: 1;
         }
         #init-overlay {
             position: absolute;
             z-index: 10;
-            color: rgba(255, 255, 255, 0.6);
+            color: rgba(255, 255, 255, 0.5);
             display: flex;
             justify-content: center;
             align-items: center;
@@ -36,7 +36,7 @@
             background: rgba(0,0,0,0.8);
             pointer-events: none;
             font-size: 16px;
-            letter-spacing: 2px;
+            letter-spacing: 4px;
             text-transform: uppercase;
             transition: opacity 1s ease;
         }
@@ -44,8 +44,7 @@
 </head>
 <body>
 
-<div id="init-overlay">[ WAITING FOR AUDIO - CLICK ANYWHERE TO START ]</div>
-<canvas id="webgl-canvas"></canvas>
+<div id="init-overlay">[ CLICK ANYWHERE TO IGNITE REACTOR ]</div>
 
 <script>
     // --- AUDIO & STATE ---
@@ -53,11 +52,21 @@
     let isRunning = false;
     let audioInitialized = false;
 
-    // Smoothed FFT Bands
-    let smoothedBass = 0;
-    let smoothedMids = 0;
-    let smoothedTreble = 0;
-    let smoothedEnergy = 0;
+    // AUDIO ENVELOPE SMOOTHING (The secret to killing jitter)
+    let envBass = 0, envMids = 0, envTreble = 0;
+    
+    // Attack: How fast it jumps to the beat (0.0 to 1.0)
+    // Release: How slowly it falls back down (lower = smoother/floatier)
+    const ATTACK = 0.25; 
+    const RELEASE = 0.02; 
+
+    function smoothAudio(current, target) {
+        if (target > current) {
+            return current + (target - current) * ATTACK; 
+        } else {
+            return current + (target - current) * RELEASE;
+        }
+    }
 
     // --- AUDIO INIT ---
     async function initAudio() {
@@ -72,21 +81,18 @@
             analyser = audioContext.createAnalyser();
             
             analyser.fftSize = 512;
-            analyser.smoothingTimeConstant = 0.85; // Slightly less smoothing for punchier reactions
+            analyser.smoothingTimeConstant = 0.8; 
             
             source.connect(analyser);
             dataArray = new Uint8Array(analyser.frequencyBinCount);
             
             document.getElementById('init-overlay').style.opacity = 0;
-            
             audioInitialized = true;
-            if (audioContext.state === 'running') {
-                isRunning = true;
-                requestAnimationFrame(render);
-            }
+            if (audioContext.state === 'running') isRunning = true;
+            
         } catch (err) {
             console.warn("Microphone access denied.", err);
-            document.getElementById('init-overlay').innerText = "[ MICROPHONE ACCESS DENIED ]";
+            document.getElementById('init-overlay').innerText = "[ MICROPHONE REQUIRED ]";
         }
     }
     
@@ -96,7 +102,6 @@
         if (audioContext && audioContext.state === 'suspended') {
             audioContext.resume();
             isRunning = true;
-            requestAnimationFrame(render);
         }
     });
 
@@ -107,201 +112,141 @@
         }
     });
 
-    // --- WEBGL SHADER ---
-    const glCanvas = document.getElementById('webgl-canvas');
-    const gl = glCanvas.getContext('webgl', { alpha: false, antialias: false });
-
-    const vsSource = `
-        attribute vec2 position;
-        void main() { gl_Position = vec4(position, 0.0, 1.0); }
-    `;
-
-    const fsSource = `
-        precision highp float;
-        uniform vec2 u_resolution;
-        uniform float u_time;
-        uniform float u_audio;
-        
-        uniform float u_hueSpeed;
-        uniform float u_zoom;
-        uniform float u_deform;
-        uniform float u_spin;
-        uniform float u_glitch;
-
-        mat2 rot(float a) {
-            float s = sin(a), c = cos(a);
-            return mat2(c, -s, s, c);
-        }
-
-        vec2 map(vec3 p) {
-            vec3 z = p;
-            
-            // Forward movement driven heavily by bass
-            z.z -= u_time * u_zoom;
-            
-            // Save xy coordinate to carve out a protective tunnel for the camera
-            vec2 core = z.xy;
-            
-            // Treble twists the whole tunnel
-            z.xy *= rot(z.z * u_glitch * 0.05 + sin(u_time * 0.5) * 0.05);
-            
-            // Infinite grid repetition
-            float grid = 4.0; 
-            z = mod(z + grid/2.0, grid) - grid/2.0;
-            
-            float scale = 1.0;
-            
-            // Mids drive rotation of the fractal
-            float foldAngle1 = (u_time * 0.2) * u_spin + u_deform;
-            float foldAngle2 = (u_time * 0.1) * u_spin - u_deform;
-            
-            // Stable KIFS Fractal Loop
-            for(int i = 0; i < 4; i++) { 
-                z = abs(z) - vec3(0.5 + u_deform * 0.2, 0.4, 0.3);
-                z.xy *= rot(foldAngle1 + float(i));
-                z.xz *= rot(foldAngle2);
-                
-                float k = 1.5;
-                z *= k;
-                scale *= k;
-            }
-            
-            // Use spherical primitive for absolute distance stability
-            float dist = length(z) / scale;
-            
-            // FOOLPROOF CAMERA PROTECTION: Carve a hollow cylinder down the Z axis.
-            // This ensures distance is never negative at the camera origin, stopping the black screen bug.
-            float tube = length(core) - (0.6 + u_audio * 0.4); 
-            dist = max(dist, -tube);
-            
-            return vec2(dist, 1.0);
-        }
-
-        vec3 getNeonColor(vec3 p) {
-            float colorSeed = fract(p.x * 0.1 + p.z * 0.1 + u_time * u_hueSpeed * 0.3);
-            
-            // Strictly Soft Pink, Soft Blue, White
-            if (colorSeed < 0.33) {
-                return vec3(1.0, 0.6, 0.75); // Soft Pink
-            } else if (colorSeed < 0.66) {
-                return vec3(0.5, 0.8, 1.0); // Soft Blue
-            } else {
-                return vec3(0.9, 0.9, 1.0); // White
-            }
-        }
-
-        void main() {
-            vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / u_resolution.y;
-            
-            float split = u_glitch * 0.01; // Chromatic aberration
-            vec3 ro = vec3(0.0, 0.0, -1.0); // Camera origin safely inside the carved tube
-            vec3 col = vec3(0.0);
-            
-            for (int c = 0; c < 3; c++) {
-                vec2 suv = uv;
-                if (c == 0) suv.x -= split; 
-                if (c == 2) suv.x += split; 
-                
-                vec3 rd = normalize(vec3(suv, 1.0));
-                
-                float t = 0.0;
-                float accumulatedGlow = 0.0;
-                vec2 res;
-                vec3 p;
-                
-                for(int i = 0; i < 70; i++) {
-                    p = ro + rd * t;
-                    res = map(p);
-                    
-                    if(res.x < 0.002 || t > 18.0) break;
-                    
-                    // Add volumetric glow when rays pass close to surfaces
-                    accumulatedGlow += (0.01 / (0.01 + res.x * res.x));
-                    t += res.x * 0.6; // Safe stepping to prevent clipping inside walls
-                }
-                
-                if(t < 18.0) {
-                    float fog = exp(-0.03 * t * t); // Fog depth
-                    vec3 neon = getNeonColor(p);
-                    
-                    // Dark base material with bright neon highlights
-                    vec3 baseCol = vec3(0.02); 
-                    
-                    // Glow heavily multipliers by audio energy
-                    float smoothGlow = accumulatedGlow * (0.05 + u_audio * 0.15);
-                    baseCol += neon * smoothGlow;
-                    
-                    if (c == 0) col.r = (baseCol * fog).r;
-                    else if (c == 1) col.g = (baseCol * fog).g;
-                    else col.b = (baseCol * fog).b;
-                }
-            }
-            
-            col *= 1.0 - dot(uv, uv) * 0.7; // Heavy basement vignette
-            gl_FragColor = vec4(col, 1.0);
-        }
-    `;
-
-    function compileShader(gl, source, type) {
-        const shader = gl.createShader(type);
-        gl.shaderSource(shader, source);
-        gl.compileShader(shader);
-        return shader;
-    }
-
-    const program = gl.createProgram();
-    gl.attachShader(program, compileShader(gl, vsSource, gl.VERTEX_SHADER));
-    gl.attachShader(program, compileShader(gl, fsSource, gl.FRAGMENT_SHADER));
-    gl.linkProgram(program);
-    gl.useProgram(program);
-
-    const posBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
-    const posLoc = gl.getAttribLocation(program, "position");
-    gl.enableVertexAttribArray(posLoc);
-    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
-
-    const uniforms = {
-        res: gl.getUniformLocation(program, "u_resolution"),
-        time: gl.getUniformLocation(program, "u_time"),
-        audio: gl.getUniformLocation(program, "u_audio"),
-        hueSpeed: gl.getUniformLocation(program, "u_hueSpeed"),
-        zoom: gl.getUniformLocation(program, "u_zoom"),
-        deform: gl.getUniformLocation(program, "u_deform"),
-        spin: gl.getUniformLocation(program, "u_spin"),
-        glitch: gl.getUniformLocation(program, "u_glitch")
-    };
-
-    function resize() {
-        glCanvas.width = window.innerWidth;
-        glCanvas.height = window.innerHeight;
-        gl.viewport(0, 0, glCanvas.width, glCanvas.height);
-    }
-    window.addEventListener('resize', resize);
-    resize();
+    // --- THREE.JS SETUP ---
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x030303, 0.015);
     
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 15, 60);
+    camera.lookAt(0, 0, 0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    document.body.appendChild(renderer.domElement);
+
+    // --- LIGHTING ---
+    const ambientLight = new THREE.AmbientLight(0x111111);
+    scene.add(ambientLight);
+
+    const pinkLight = new THREE.PointLight(0xffb6c1, 0, 150); // Soft Pink
+    pinkLight.position.set(-20, 10, 20);
+    scene.add(pinkLight);
+
+    const blueLight = new THREE.PointLight(0xadd8e6, 0, 150); // Soft Blue
+    blueLight.position.set(20, -10, -20);
+    scene.add(blueLight);
+
+    const whiteLight = new THREE.PointLight(0xffffff, 0, 100); // White core pulse
+    whiteLight.position.set(0, 0, 0);
+    scene.add(whiteLight);
+
+    // --- 1. THE DARK CORE (Central Sphere) ---
+    const coreGeo = new THREE.IcosahedronGeometry(12, 5); // Smooth high-poly sphere
+    const coreMat = new THREE.MeshStandardMaterial({
+        color: 0x050505, // Almost black
+        metalness: 0.9,
+        roughness: 0.2,
+        flatShading: true // Gives it a slight industrial, faceted edge
+    });
+    const core = new THREE.Mesh(coreGeo, coreMat);
+    scene.add(core);
+
+    // Save original vertices for smooth geometric pulsing
+    const corePositions = coreGeo.attributes.position.clone();
+
+    // --- 2. THE PARTICLE VORTEX ---
+    const particleCount = 40000;
+    const particlesGeo = new THREE.BufferGeometry();
+    const posArray = new Float32Array(particleCount * 3);
+    const colorArray = new Float32Array(particleCount * 3);
+
+    // Generate a soft circular texture for the particles via canvas
+    const canvas = document.createElement('canvas');
+    canvas.width = 32; canvas.height = 32;
+    const ctx = canvas.getContext('2d');
+    const grad = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+    grad.addColorStop(0, 'rgba(255,255,255,1)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 32, 32);
+    const particleTexture = new THREE.CanvasTexture(canvas);
+
+    // Build the galaxy rings
+    for (let i = 0; i < particleCount; i++) {
+        // Distribute in a disc/torus shape
+        let radius = 15 + Math.random() * 80;
+        let theta = Math.random() * Math.PI * 2;
+        // Y spread gets thinner further out
+        let ySpread = (Math.random() - 0.5) * (1000 / radius); 
+
+        posArray[i * 3] = Math.cos(theta) * radius;
+        posArray[i * 3 + 1] = ySpread;
+        posArray[i * 3 + 2] = Math.sin(theta) * radius;
+
+        // Assign Colors: Soft Pink, Soft Blue, White
+        let randColor = Math.random();
+        if (randColor < 0.4) {
+            // Soft Pink (255, 182, 193)
+            colorArray[i*3] = 1.0; colorArray[i*3+1] = 0.71; colorArray[i*3+2] = 0.75;
+        } else if (randColor < 0.8) {
+            // Soft Blue (173, 216, 230)
+            colorArray[i*3] = 0.67; colorArray[i*3+1] = 0.84; colorArray[i*3+2] = 0.90;
+        } else {
+            // White
+            colorArray[i*3] = 1.0; colorArray[i*3+1] = 1.0; colorArray[i*3+2] = 1.0;
+        }
+    }
+
+    particlesGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+    particlesGeo.setAttribute('color', new THREE.BufferAttribute(colorArray, 3));
+
+    const particlesMat = new THREE.PointsMaterial({
+        size: 0.8,
+        map: particleTexture,
+        transparent: true,
+        opacity: 0.8,
+        vertexColors: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+    });
+
+    const particleSystem = new THREE.Points(particlesGeo, particlesMat);
+    
+    // Tilt the vortex for a better cinematic angle
+    particleSystem.rotation.x = 0.2;
+    particleSystem.rotation.z = -0.1;
+    scene.add(particleSystem);
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
     // --- RENDER LOOP ---
-    function render(time) {
-        if (!isRunning) return;
-        requestAnimationFrame(render);
-        
+    const clock = new THREE.Clock();
+
+    function animate() {
+        requestAnimationFrame(animate);
+        if (!isRunning) {
+            renderer.render(scene, camera);
+            return;
+        }
+
+        const time = clock.getElapsedTime();
+
+        // --- AUDIO PROCESSING ---
         analyser.getByteFrequencyData(dataArray);
         
-        let bassSum = 0, midSum = 0, trebleSum = 0, totalSum = 0;
+        let bassSum = 0, midSum = 0, trebleSum = 0;
+        const bassEnd = 15, midEnd = 120, trebleEnd = 255;   
         
-        const bassEnd = 15;      
-        const midEnd = 120;      
-        const trebleEnd = 255;   
-        
-        // SIGNAL BOOSTER: Multiply raw mic signal to force reactivity even on quiet inputs
-        const audioMultiplier = 3.5; 
+        // Boost signal internally
+        const audioBoost = 3.0; 
         
         for (let i = 0; i < 256; i++) {
-            // Read and boost signal, capping at 1.0 to prevent blowout
-            let val = Math.min(1.0, (dataArray[i] / 255.0) * audioMultiplier);
-            totalSum += val;
-            
+            let val = Math.min(1.0, (dataArray[i] / 255.0) * audioBoost);
             if (i < bassEnd) bassSum += val;
             else if (i < midEnd) midSum += val;
             else if (i < trebleEnd) trebleSum += val;
@@ -310,35 +255,60 @@
         let rawBass = bassSum / bassEnd;
         let rawMids = midSum / (midEnd - bassEnd);
         let rawTreble = trebleSum / (trebleEnd - midEnd);
-        let rawEnergy = totalSum / 256;
 
-        // Smooth output to keep motion fluid, not jittery
-        smoothedBass = smoothedBass * 0.8 + rawBass * 0.2;
-        smoothedMids = smoothedMids * 0.8 + rawMids * 0.2;
-        smoothedTreble = smoothedTreble * 0.8 + rawTreble * 0.2;
-        smoothedEnergy = smoothedEnergy * 0.8 + rawEnergy * 0.2;
+        // APPLY ENVELOPE SMOOTHING (Kills the jitter)
+        envBass = smoothAudio(envBass, rawBass);
+        envMids = smoothAudio(envMids, rawMids);
+        envTreble = smoothAudio(envTreble, rawTreble);
 
-        // --- EXAGGERATED FFT MAPPING ---
-        let dynHueSpeed = 0.2 + (smoothedTreble * 1.5);
-        let dynGlitch   = smoothedTreble * 2.0;       // Treble warps screen edges
-        
-        let dynZoom     = 1.0 + (smoothedBass * 6.0); // Bass violently pushes tunnel forward
-        let dynDeform   = smoothedBass * 3.0;         // Bass swells geometry heavily
-        
-        let dynSpin     = 0.5 + (smoothedMids * 4.0); // Mids cause aggressive rotation
+        // --- APPLY TO VISUALS ---
 
-        gl.uniform2f(uniforms.res, glCanvas.width, glCanvas.height);
-        gl.uniform1f(uniforms.time, time * 0.001);
-        gl.uniform1f(uniforms.audio, smoothedEnergy);
+        // 1. Lighting Pulses (Driven by Bass & Treble)
+        pinkLight.intensity = envBass * 5;
+        blueLight.intensity = envBass * 5;
+        whiteLight.intensity = envTreble * 3;
+
+        // 2. Core Breathing & Deformation
+        // The sphere expands with the bass, creating a heartbeat effect
+        let coreScale = 1.0 + (envBass * 0.3);
+        core.scale.set(coreScale, coreScale, coreScale);
         
-        gl.uniform1f(uniforms.hueSpeed, dynHueSpeed);
-        gl.uniform1f(uniforms.zoom, dynZoom);
-        gl.uniform1f(uniforms.deform, dynDeform);
-        gl.uniform1f(uniforms.spin, dynSpin);
-        gl.uniform1f(uniforms.glitch, dynGlitch);
+        // Slowly rotate the core
+        core.rotation.y = time * 0.2;
+        core.rotation.x = time * 0.1;
+
+        // Smoothly displace the core's vertices based on mids
+        const pos = core.geometry.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+            let p = new THREE.Vector3().fromBufferAttribute(corePositions, i);
+            
+            // Generate a slow, smooth wave
+            let wave = Math.sin(p.x * 0.5 + time) * Math.cos(p.z * 0.5 + time);
+            
+            // Mids push the vertices out, creating smooth ridges
+            p.multiplyScalar(1.0 + (wave * envMids * 0.15));
+            pos.setXYZ(i, p.x, p.y, p.z);
+        }
+        pos.needsUpdate = true;
+        core.geometry.computeVertexNormals(); // Keeps shading smooth
+
+        // 3. Particle Vortex Dynamics
+        // Base rotation + extra speed from Mids
+        particleSystem.rotation.y = (time * 0.05) + (envMids * 0.5);
         
-        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        // Treble brightens and slightly enlarges the particles
+        particlesMat.size = 0.6 + (envTreble * 1.5);
+        particlesMat.opacity = 0.5 + (envTreble * 0.5);
+
+        // 4. Cinematic Camera Drift
+        camera.position.x = Math.sin(time * 0.1) * 15;
+        camera.position.y = 15 + Math.sin(time * 0.2) * 5;
+        camera.lookAt(0, 0, 0);
+
+        renderer.render(scene, camera);
     }
+
+    animate();
 </script>
 </body>
 </html>
