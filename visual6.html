@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Audioactive Visualizer - The Dyson Matrix</title>
+    <title>Audioactive Visualizer - The Neural Lattice</title>
     <!-- Import Three.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
@@ -44,7 +44,7 @@
 </head>
 <body>
 
-<div id="init-overlay">[ CLICK ANYWHERE TO IGNITE DYSON MATRIX ]</div>
+<div id="init-overlay">[ CLICK ANYWHERE TO IGNITE LATTICE ]</div>
 
 <script>
     // --- AUDIO & STATE ---
@@ -52,14 +52,18 @@
     let isRunning = false;
     let audioInitialized = false;
 
-    // GPU Audio Texture Data
+    // GPU Audio Texture
     let audioTexture;
     let audioData = new Uint8Array(256);
 
-    // Audio Envelopes (Buttery smooth macro-reactions)
+    // Audio Envelopes & Flight Distance
     let envBass = 0, envMids = 0, envTreble = 0;
-    const ATTACK = 0.35;  
-    const RELEASE = 0.04; 
+    let flightDistance = 0; 
+    let currentFlightSpeed = 0.05; 
+    
+    // Snappy attack, smooth release
+    const ATTACK = 0.25; 
+    const RELEASE = 0.03; 
 
     function smoothAudio(current, target) {
         return (target > current) 
@@ -80,7 +84,7 @@
             analyser = audioContext.createAnalyser();
             
             analyser.fftSize = 512;
-            analyser.smoothingTimeConstant = 0.6; // Low smoothing for sharp visual strikes
+            analyser.smoothingTimeConstant = 0.6; // High responsiveness
             
             source.connect(analyser);
             dataArray = new Uint8Array(analyser.frequencyBinCount);
@@ -113,10 +117,10 @@
 
     // --- THREE.JS SETUP ---
     const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x010101, 0.005); 
+    scene.fog = new THREE.FogExp2(0x010101, 0.008); 
     
-    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500);
-    camera.position.set(0, 15, 90); 
+    const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 400);
+    camera.position.set(0, 0, 0); 
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -124,215 +128,215 @@
     renderer.setClearColor(0x010101, 1);
     document.body.appendChild(renderer.domElement);
 
-    // --- AUDIO TEXTURE FOR SHADER ---
     audioTexture = new THREE.DataTexture(audioData, 256, 1, THREE.LuminanceFormat, THREE.UnsignedByteType);
     audioTexture.magFilter = THREE.LinearFilter; 
     audioTexture.minFilter = THREE.LinearFilter;
 
-    // --- GENERATE GLOWING PARTICLE TEXTURE ---
-    const canvas = document.createElement('canvas');
-    canvas.width = 32; canvas.height = 32;
-    const ctx = canvas.getContext('2d');
-    const grad = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
-    grad.addColorStop(0, 'rgba(255,255,255,1)');
-    grad.addColorStop(0.2, 'rgba(255,255,255,0.8)');
-    grad.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, 32, 32);
-    const particleTexture = new THREE.CanvasTexture(canvas);
+    // --- BUILD THE INFINITE NEURAL LATTICE ---
+    const instanceCount = 12000;
+    
+    // We use a basic 1x1x1 box. The vertex shader will stretch it into long beams based on audio
+    const beamGeo = new THREE.BoxGeometry(1, 1, 1);
+    
+    // Instanced Attributes
+    const colors = new Float32Array(instanceCount * 3);
+    const freqBins = new Float32Array(instanceCount); // Which audio bin this beam listens to
+    const isDiagonal = new Float32Array(instanceCount); // Identifies the white diagonal lines for data-pulses
 
-    // --- BUILD THE DYSON SPHERE GEOMETRY ---
-    const R = 40; // Sphere Radius
-    const positions = [];
-    const colors = [];
-    const types = []; // 0 = Latitude Ring, 1 = Longitude Line
-    const origPos = [];
+    const dummy = new THREE.Object3D();
+    const meshMatrix = new THREE.InstancedMesh(beamGeo, null, instanceCount); // Material set later
 
-    // 1. Latitude Rings (Pink and Blue)
-    const numLatitudes = 120;
-    for(let j = 1; j < numLatitudes; j++) {
-        let phi = (j / numLatitudes) * Math.PI; // 0 to PI
-        let y = Math.cos(phi) * R;
-        let ringR = Math.sin(phi) * R;
+    let i = 0;
+    // Generate a massive 3D grid
+    for (let x = -50; x <= 50; x += 8) {
+        for (let y = -50; y <= 50; y += 8) {
+            for (let z = 50; z >= -350; z -= 8) {
+                if (i >= instanceCount) break;
 
-        let pointsInRing = Math.floor(ringR * 8) + 10;
-        let isPink = (j % 2 === 0);
-        let color = isPink ? [1.0, 0.71, 0.75] : [0.67, 0.84, 0.90]; // Strict Soft Pink / Blue
+                // Carve out a hollow central cavern for the camera to fly through safely
+                let distFromCenter = Math.sqrt(x*x + y*y);
+                if (distFromCenter < 12) continue; // Skip generating beams in the center
 
-        for(let i = 0; i < pointsInRing; i++) {
-            let theta = (i / pointsInRing) * Math.PI * 2;
-            let x = Math.cos(theta) * ringR;
-            let z = Math.sin(theta) * ringR;
+                // Add organic noise so it's not a perfect grid, creating "pockets"
+                if (Math.random() > 0.6) continue;
 
-            positions.push(x, y, z);
-            origPos.push(x, y, z);
-            colors.push(...color);
-            types.push(0.0);
+                // STRICT GEOMETRIC ASSIGNMENT
+                let randAngle = Math.random();
+                let col, rot, diagFlag = 0.0;
+
+                if (randAngle < 0.25) {
+                    // 0 Degrees (Horizontal X) -> Soft Pink
+                    rot = [0, 0, 0];
+                    col = [1.0, 0.71, 0.75];
+                } else if (randAngle < 0.5) {
+                    // 90 Degrees (Vertical Y) -> Soft Blue
+                    rot = [0, 0, Math.PI / 2];
+                    col = [0.67, 0.84, 0.90];
+                } else if (randAngle < 0.75) {
+                    // 45 Degrees (Diagonal XZ) -> White
+                    rot = [0, Math.PI / 4, 0];
+                    col = [1.0, 1.0, 1.0];
+                    diagFlag = 1.0;
+                } else {
+                    // 135 Degrees (Diagonal XZ) -> White
+                    rot = [0, 3 * Math.PI / 4, 0];
+                    col = [1.0, 1.0, 1.0];
+                    diagFlag = 1.0;
+                }
+
+                // Random spatial jitter to make the architecture complex
+                let jx = x + (Math.random() - 0.5) * 4;
+                let jy = y + (Math.random() - 0.5) * 4;
+                let jz = z + (Math.random() - 0.5) * 4;
+
+                dummy.position.set(jx, jy, jz);
+                dummy.rotation.set(rot[0], rot[1], rot[2]);
+                dummy.updateMatrix();
+                
+                meshMatrix.setMatrixAt(i, dummy.matrix);
+                
+                colors[i*3] = col[0];
+                colors[i*3+1] = col[1];
+                colors[i*3+2] = col[2];
+                
+                // Map frequency bin based on distance from center (inner beams get bass, outer get treble)
+                freqBins[i] = Math.min(1.0, distFromCenter / 70.0);
+                isDiagonal[i] = diagFlag;
+                
+                i++;
+            }
         }
     }
+    
+    // Update count in case we skipped some via noise
+    meshMatrix.count = i;
+    
+    beamGeo.setAttribute('aColor', new THREE.InstancedBufferAttribute(colors, 3));
+    beamGeo.setAttribute('aFreqBin', new THREE.InstancedBufferAttribute(freqBins, 1));
+    beamGeo.setAttribute('aIsDiagonal', new THREE.InstancedBufferAttribute(isDiagonal, 1));
 
-    // 2. Longitude Lines (Strict Geometric Angles: 0, 45, 90, 135)
-    // These inherently cover 180, 225, 270, 315 on the back side of the sphere.
-    const strictAngles = [0, 45, 90, 135].map(a => a * Math.PI / 180);
-    for(let a of strictAngles) {
-        let numPoints = 800; // Very dense so the white lines look solid and prominent
-        for(let i = 0; i < numPoints; i++) {
-            let phi = (i / numPoints) * Math.PI * 2; // Full circle
-            let y = Math.cos(phi) * R;
-            let ringR = Math.sin(phi) * R;
-
-            let x = Math.cos(a) * ringR;
-            let z = Math.sin(a) * ringR;
-
-            positions.push(x, y, z);
-            origPos.push(x, y, z);
-            colors.push(1.0, 1.0, 1.0); // Pure White
-            types.push(1.0);
-        }
-    }
-
-    const sphereGeo = new THREE.BufferGeometry();
-    sphereGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    sphereGeo.setAttribute('aOrigPos', new THREE.Float32BufferAttribute(origPos, 3));
-    sphereGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    sphereGeo.setAttribute('aType', new THREE.Float32BufferAttribute(types, 1));
-
-    // --- CUSTOM GPU SHADER MATERIAL ---
-    const customUniforms = {
+    // --- CUSTOM KINETIC SHADER MATERIAL ---
+    const latticeUniforms = {
         uTime: { value: 0 },
+        uScroll: { value: 0 },
         uAudioTex: { value: audioTexture },
-        uPointTex: { value: particleTexture },
         uBass: { value: 0 },
         uMids: { value: 0 },
         uTreble: { value: 0 }
     };
 
-    const shaderMaterial = new THREE.ShaderMaterial({
-        uniforms: customUniforms,
-        vertexColors: true,
+    const latticeMaterial = new THREE.ShaderMaterial({
+        uniforms: latticeUniforms,
         transparent: true,
         blending: THREE.AdditiveBlending,
-        depthWrite: false,
+        depthWrite: true,
         vertexShader: `
             uniform float uTime;
+            uniform float uScroll;
             uniform sampler2D uAudioTex;
+            
             uniform float uBass;
             uniform float uMids;
             uniform float uTreble;
 
-            attribute vec3 aOrigPos;
-            attribute float aType;
+            attribute vec3 aColor;
+            attribute float aFreqBin;
+            attribute float aIsDiagonal;
 
             varying vec3 vColor;
-            varying float vType;
-            varying float vSpark;
-            varying float vAudioVal;
+            varying vec2 vUv;
+            varying float vAudio;
+            varying float vIsDiagonal;
+            varying float vLocalZ;
+            varying vec3 vWorldPos;
 
             void main() {
-                vColor = color;
-                vType = aType;
-                vec3 pos = position;
+                vUv = uv;
+                vColor = aColor;
+                vIsDiagonal = aIsDiagonal;
+
+                // Read exact audio volume for this specific beam
+                float rawAudio = texture2D(uAudioTex, vec2(aFreqBin, 0.5)).r;
+                vAudio = rawAudio;
+
+                // 1. KINETIC EXTRUSION (The Core Innovation)
+                // The base cube is 1x1x1. We scale it along its LOCAL Z-axis to turn it into a beam.
+                // Mids drive the length. High mids = the beams physically shoot out and intersect.
+                vec3 localPos = position;
                 
-                // Normal direction (outward from center of sphere)
-                vec3 normalDir = normalize(aOrigPos);
+                float targetLength = 3.0 + (rawAudio * 45.0 * (1.0 + uMids * 2.5));
+                localPos.z *= targetLength;
+                vLocalZ = localPos.z; // Pass to fragment for data-stream pulses
 
-                // 1. MACRO AUDIO DISPLACEMENT (Bass & Mids)
-                // Bass inflates the entire sphere
-                float expansion = uBass * 8.0;
+                // Bass thickens the beams violently
+                float thickness = 0.15 + (uBass * 1.5 * aFreqBin) + (rawAudio * 0.4);
+                localPos.x *= thickness;
+                localPos.y *= thickness;
+
+                // 2. INFINITE TUNNEL WRAP
+                // Transform local beam to world space
+                vec4 worldPos = instanceMatrix * vec4(localPos, 1.0);
                 
-                // Mids create cymatic ripples across the surface
-                float ripple = sin(aOrigPos.y * 0.3 - uTime * 4.0) * (uMids * 4.0) +
-                               cos(aOrigPos.x * 0.3 + uTime * 3.0) * (uMids * 4.0);
-
-                pos += normalDir * (expansion + ripple);
-
-                // 2. MICRO AUDIO DISPLACEMENT (Raw FFT Texture)
-                vAudioVal = 0.0;
-                vSpark = 0.0;
-
-                if (aType < 0.5) {
-                    // LATITUDE RINGS (Pink/Blue)
-                    // Map the Y position (equator to pole) to the frequency spectrum (0 to 1)
-                    float normalizedY = abs(aOrigPos.y / 40.0); 
-                    // Curve it so bass handles the equator, treble handles the poles
-                    float audioVal = texture2D(uAudioTex, vec2(pow(normalizedY, 0.8), 0.5)).r;
-                    vAudioVal = audioVal;
-
-                    // Extrude the ring particles based on exact frequency
-                    pos += normalDir * (audioVal * uTreble * 8.0);
-                } 
-                else {
-                    // LONGITUDE LINES (White Strict Angles)
-                    // Treble sends high-speed data sparks down the white lines
-                    float sparkWave = sin(aOrigPos.y * 0.4 - uTime * 15.0);
-                    float isSpark = step(0.98, sparkWave); // Only trigger at the peak of the sine wave
-                    
-                    vSpark = isSpark * uTreble * 2.0;
-                    
-                    // The spark physically bulges the line outward
-                    pos += normalDir * (isSpark * uTreble * 10.0);
-                }
-
-                vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+                // Add the accumulated flight distance to move the tunnel past the camera
+                worldPos.z += uScroll;
                 
-                // Base point size + reactive scaling
-                float pSize = 1.0 + (vAudioVal * 4.0) + (vSpark * 3.0) + (uBass * 1.5);
-                gl_PointSize = pSize * (150.0 / -mvPosition.z);
+                // Math to loop the tunnel infinitely without the user ever noticing
+                // Tunnel exists between +50 and -350 (Length: 400).
+                float tunnelLen = 400.0;
+                worldPos.z = mod(worldPos.z - 50.0, tunnelLen) - tunnelLen + 50.0;
                 
-                gl_Position = projectionMatrix * mvPosition;
+                vWorldPos = worldPos.xyz;
+                gl_Position = projectionMatrix * viewMatrix * worldPos;
             }
         `,
         fragmentShader: `
-            uniform sampler2D uPointTex;
+            uniform float uTime;
             uniform float uTreble;
             uniform float uBass;
 
             varying vec3 vColor;
-            varying float vType;
-            varying float vSpark;
-            varying float vAudioVal;
+            varying vec2 vUv;
+            varying float vAudio;
+            varying float vIsDiagonal;
+            varying float vLocalZ;
+            varying vec3 vWorldPos;
 
             void main() {
-                vec4 texColor = texture2D(uPointTex, gl_PointCoord);
-                
-                vec3 finalColor = vColor;
-                float finalAlpha = texColor.a;
+                // Procedural Glowing Wireframe Edge
+                vec2 grid = abs(vUv - 0.5) * 2.0; // 0 at center, 1 at edges
+                float edge = smoothstep(0.7, 1.0, max(grid.x, grid.y));
 
-                if (vType < 0.5) {
-                    // LATITUDE RINGS
-                    // Glow intensifies where the local audio frequency hits
-                    finalColor += vec3(vAudioVal * 0.8);
-                    finalAlpha *= (0.4 + vAudioVal * 0.8 + uBass * 0.3);
-                } else {
-                    // LONGITUDE LINES (White)
-                    // Lines are always visible, but glow bright with treble
-                    finalColor += vec3(uTreble * 1.5) + vec3(vSpark);
-                    finalAlpha *= (0.6 + uTreble * 0.5 + vSpark);
-                }
+                // The base of the architecture is pitch black, glossy obsidian
+                vec3 baseMetal = vec3(0.01);
                 
-                gl_FragColor = vec4(finalColor, finalAlpha);
+                // Edge Glow (Neon light bleeding out of the metallic casing)
+                float glowIntensity = (vAudio * 3.0) + (uTreble * 2.0);
+                vec3 edgeGlow = vColor * edge * glowIntensity;
+                
+                // Additive final color
+                vec3 finalColor = baseMetal + edgeGlow;
+
+                // THE DATA PULSE (Treble injects white light down the diagonal axes)
+                if (vIsDiagonal > 0.5) {
+                    // A sine wave traveling down the local length of the beam
+                    float pulse = sin(vLocalZ * 1.5 - uTime * 20.0);
+                    // Snap it so it looks like a distinct laser packet, not a blurry wave
+                    float isSpark = step(0.95, pulse); 
+                    
+                    // Add blinding white spark multiplied by treble
+                    finalColor += vec3(isSpark) * (vAudio + uTreble * 5.0) * vColor;
+                }
+
+                // Deep depth fading (Exponential fog) to hide the wrapping point seamlessly
+                float depthFade = exp(-abs(vWorldPos.z) * 0.008);
+
+                gl_FragColor = vec4(finalColor * depthFade, 1.0);
             }
         `
     });
 
-    const dysonSphere = new THREE.Points(sphereGeo, shaderMaterial);
-    scene.add(dysonSphere);
-
-    // --- AMBIENT DUST ---
-    const dustGeo = new THREE.BufferGeometry();
-    const dustPos = new Float32Array(3000 * 3);
-    for (let i = 0; i < 3000; i++) {
-        dustPos[i*3] = (Math.random() - 0.5) * 200;
-        dustPos[i*3+1] = (Math.random() - 0.5) * 200;
-        dustPos[i*3+2] = (Math.random() - 0.5) * 200;
-    }
-    dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
-    const dustMat = new THREE.PointsMaterial({
-        color: 0xffffff, size: 0.3, transparent: true, opacity: 0.3, depthWrite: false
-    });
-    const dustSystem = new THREE.Points(dustGeo, dustMat);
-    scene.add(dustSystem);
-
+    meshMatrix.material = latticeMaterial;
+    scene.add(meshMatrix);
 
     window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
@@ -350,14 +354,15 @@
             return;
         }
 
+        let delta = Math.min(clock.getDelta(), 0.1); 
         const time = clock.getElapsedTime();
 
         // 1. Audio Processing & GPU Texture Update
         analyser.getByteFrequencyData(dataArray);
         
-        // Massive signal booster to ensure deep reactivity to all layers of music
+        // Push raw audio to GPU. Multiplier boosted for intense structural reactivity
         for(let i=0; i<dataArray.length; i++) {
-            audioData[i] = Math.min(255, dataArray[i] * 2.8);
+            audioData[i] = Math.min(255, dataArray[i] * 2.5);
         }
         audioTexture.needsUpdate = true;
 
@@ -371,31 +376,29 @@
         let rawMids = midSum / 100;
         let rawTreble = trebleSum / 105;
 
-        // Apply organic smoothing envelopes
-        envBass = smoothAudio(envBass, rawBass * 2.0);
-        envMids = smoothAudio(envMids, rawMids * 2.5);
-        envTreble = smoothAudio(envTreble, rawTreble * 3.0);
+        // Smooth envelopes
+        envBass = smoothAudio(envBass, rawBass * 1.8);
+        envMids = smoothAudio(envMids, rawMids * 2.0);
+        envTreble = smoothAudio(envTreble, rawTreble * 2.5);
 
-        // 3. Update the Dyson Sphere
-        customUniforms.uTime.value = time;
-        customUniforms.uBass.value = envBass;
-        customUniforms.uMids.value = envMids;
-        customUniforms.uTreble.value = envTreble;
+        // 3. SMOOTH INERTIA FLIGHT MECHANIC
+        // Bass drops instantly accelerate you to warp speed through the matrix
+        let targetFlightSpeed = 0.05 + (envBass * 8.0);
+        currentFlightSpeed += (targetFlightSpeed - currentFlightSpeed) * 0.1;
+        flightDistance += currentFlightSpeed * delta * 50.0; // Scaled for massive scale
 
-        // Rotate the entire sphere smoothly
-        dysonSphere.rotation.y = time * 0.15;
-        dysonSphere.rotation.z = time * 0.05;
+        // 4. Update Shader Uniforms
+        latticeUniforms.uTime.value = time;
+        latticeUniforms.uScroll.value = flightDistance; 
+        latticeUniforms.uBass.value = envBass;
+        latticeUniforms.uMids.value = envMids;
+        latticeUniforms.uTreble.value = envTreble;
 
-        // 4. Cinematic Reactive Camera
-        // Orbit around the sphere
-        camera.position.x = Math.sin(time * 0.2) * 35;
-        camera.position.y = 15 + Math.cos(time * 0.3) * 10;
-        
-        // Bass drops cause the camera to pull back, revealing the expanded sphere
-        camera.position.z = 85 + (envBass * 20.0);
-        camera.lookAt(0, 0, 0);
-
-        dustSystem.rotation.y = time * 0.05;
+        // 5. Camera Drift
+        // Subtly sway the camera to give a sense of floating weightlessly in the matrix
+        camera.rotation.z = Math.sin(flightDistance * 0.02) * 0.1;
+        camera.position.x = Math.cos(flightDistance * 0.03) * 2.0;
+        camera.position.y = Math.sin(flightDistance * 0.025) * 2.0;
 
         renderer.render(scene, camera);
     }
