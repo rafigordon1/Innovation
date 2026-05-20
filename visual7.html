@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audioactive Visualizer - Bioluminescent Nebula</title>
+    <!-- Import Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #030305;
+            font-family: 'Courier New', Courier, monospace;
+            cursor: pointer;
+        }
+        canvas {
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+        #init-overlay {
+            position: absolute;
+            z-index: 10;
+            color: rgba(255, 255, 255, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            height: 100%;
+            background: rgba(3, 3, 5, 0.85);
+            pointer-events: none;
+            font-size: 16px;
+            letter-spacing: 4px;
+            text-transform: uppercase;
+            transition: opacity 1.5s ease;
+        }
+    </style>
+</head>
+<body>
+
+<div id="init-overlay">[ CLICK ANYWHERE TO AWAKEN ENTITY ]</div>
+
+<script>
+    // --- AUDIO & STATE ---
+    let audioContext, analyser, dataArray;
+    let isRunning = false;
+    let audioInitialized = false;
+
+    let audioTexture;
+    let audioData = new Uint8Array(256);
+
+    // Envelopes for organic, buttery-smooth momentum
+    let envBass = 0, envMids = 0, envTreble = 0;
+    const ATTACK = 0.25;  
+    const RELEASE = 0.03; 
+
+    function smoothAudio(current, target) {
+        return (target > current) 
+            ? current + (target - current) * ATTACK 
+            : current + (target - current) * RELEASE;
+    }
+
+    // --- AUDIO INIT ---
+    async function initAudio() {
+        if (audioInitialized) {
+            if (audioContext.state === 'suspended') await audioContext.resume();
+            return;
+        }
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const source = audioContext.createMediaStreamSource(stream);
+            analyser = audioContext.createAnalyser();
+            
+            analyser.fftSize = 512;
+            analyser.smoothingTimeConstant = 0.65; // Highly responsive
+            
+            source.connect(analyser);
+            dataArray = new Uint8Array(analyser.frequencyBinCount);
+            
+            document.getElementById('init-overlay').style.opacity = 0;
+            audioInitialized = true;
+            if (audioContext.state === 'running') isRunning = true;
+            
+        } catch (err) {
+            console.warn("Microphone access denied.", err);
+            document.getElementById('init-overlay').innerText = "[ MICROPHONE REQUIRED ]";
+        }
+    }
+    
+    window.addEventListener('load', initAudio);
+    window.addEventListener('click', () => {
+        initAudio();
+        if (audioContext && audioContext.state === 'suspended') {
+            audioContext.resume();
+            isRunning = true;
+        }
+    });
+
+    window.addEventListener('keydown', (e) => {
+        if (e.key === ' ') {
+            document.body.style.opacity = 0;
+            setTimeout(() => window.location.href = 'index.html', 2000);
+        }
+    });
+
+    // --- THREE.JS SETUP ---
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x030305, 0.005); 
+    
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 800);
+    camera.position.set(0, 0, 100); 
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setClearColor(0x030305, 1);
+    document.body.appendChild(renderer.domElement);
+
+    // --- AUDIO TEXTURE ---
+    audioTexture = new THREE.DataTexture(audioData, 256, 1, THREE.LuminanceFormat, THREE.UnsignedByteType);
+    audioTexture.magFilter = THREE.LinearFilter; 
+    audioTexture.minFilter = THREE.LinearFilter;
+
+    // --- REUSABLE NOISE GLSL ---
+    const noiseGLSL = `
+        vec3 hash(vec3 p) {
+            p = vec3(dot(p, vec3(127.1, 311.7, 74.7)),
+                     dot(p, vec3(269.5, 183.3, 246.1)),
+                     dot(p, vec3(113.5, 271.9, 124.6)));
+            return -1.0 + 2.0 * fract(sin(p) * 43758.5453123);
+        }
+
+        float noise(vec3 p) {
+            vec3 i = floor(p);
+            vec3 f = fract(p);
+            vec3 u = f * f * (3.0 - 2.0 * f);
+            return mix(mix(mix(dot(hash(i + vec3(0.0,0.0,0.0)), f - vec3(0.0,0.0,0.0)), 
+                               dot(hash(i + vec3(1.0,0.0,0.0)), f - vec3(1.0,0.0,0.0)), u.x),
+                           mix(dot(hash(i + vec3(0.0,1.0,0.0)), f - vec3(0.0,1.0,0.0)), 
+                               dot(hash(i + vec3(1.0,1.0,0.0)), f - vec3(1.0,1.0,0.0)), u.x), u.y),
+                       mix(mix(dot(hash(i + vec3(0.0,0.0,1.0)), f - vec3(0.0,0.0,1.0)), 
+                               dot(hash(i + vec3(1.0,0.0,1.0)), f - vec3(1.0,0.0,1.0)), u.x),
+                           mix(dot(hash(i + vec3(0.0,1.0,1.0)), f - vec3(0.0,1.0,1.0)), 
+                               dot(hash(i + vec3(1.0,1.0,1.0)), f - vec3(1.0,1.0,1.0)), u.x), u.y), u.z);
+        }
+    `;
+
+    // --- 1. THE ORGANIC CORE ---
+    const coreGeo = new THREE.IcosahedronGeometry(20, 128); // Highly subdivided sphere
+
+    const coreUniforms = {
+        uTime: { value: 0 },
+        uAudioTex: { value: audioTexture },
+        uBass: { value: 0 },
+        uMids: { value: 0 },
+        uTreble: { value: 0 }
+    };
+
+    const coreMaterial = new THREE.ShaderMaterial({
+        uniforms: coreUniforms,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        vertexShader: `
+            ${noiseGLSL}
+            uniform float uTime;
+            uniform float uBass;
+            uniform float uMids;
+
+            varying vec2 vUv;
+            varying vec3 vNormal;
+            varying vec3 vWorldPos;
+            varying float vNoise;
+
+            void main() {
+                vUv = uv;
+                vec3 pos = position;
+
+                // 3D Noise for organic liquid boiling
+                float n = noise(pos * 0.08 + uTime * 0.4);
+                float n2 = noise(pos * 0.15 - uTime * 0.5);
+                
+                vNoise = n; // Pass to fragment for color mapping
+
+                // Mids control how aggressively the liquid boils
+                float displacement = (n * 5.0) + (n2 * 3.0 * uMids * 2.0);
+                
+                pos += normal * displacement;
+
+                // Bass controls the overall breathing scale
+                pos *= 1.0 + (uBass * 0.4);
+
+                vNormal = normalize(normalMatrix * normal);
+                vec4 worldPosition = modelMatrix * vec4(pos, 1.0);
+                vWorldPos = worldPosition.xyz;
+
+                gl_Position = projectionMatrix * viewMatrix * worldPosition;
+            }
+        `,
+        fragmentShader: `
+            uniform float uTreble;
+            uniform float uBass;
+            uniform sampler2D uAudioTex;
+
+            varying vec2 vUv;
+            varying vec3 vNormal;
+            varying vec3 vWorldPos;
+            varying float vNoise;
+
+            void main() {
+                // Read global audio energy for this spot based on UV
+                float audioVal = texture2D(uAudioTex, vec2(vUv.x, 0.5)).r;
+
+                vec3 pink = vec3(1.0, 0.71, 0.75);
+                vec3 blue = vec3(0.67, 0.84, 0.90);
+                vec3 white = vec3(1.0, 1.0, 1.0);
+
+                // Mix colors organically using the noise value
+                vec3 baseColor = mix(pink, blue, smoothstep(-0.5, 0.5, vNoise));
+
+                // FRESNEL EDGE GLOW (Creates the jellyfish membrane effect)
+                vec3 viewDir = normalize(cameraPosition - vWorldPos);
+                float fresnelTerm = dot(viewDir, vNormal);
+                fresnelTerm = clamp(1.0 - fresnelTerm, 0.0, 1.0);
+                fresnelTerm = pow(fresnelTerm, 3.0); 
+
+                // Core is translucent, edges glow brightly
+                vec3 edgeGlow = baseColor * fresnelTerm * (2.0 + uBass * 3.0);
+                
+                // Treble creates bright white electric flashes through the tissue
+                float flash = audioVal * uTreble * 3.0;
+                vec3 reactiveColor = mix(edgeGlow, white, flash * fresnelTerm);
+
+                // Alpha is tied to fresnel (hollow inside) and audio spikes
+                float alpha = fresnelTerm * 0.8 + (flash * 0.5);
+
+                gl_FragColor = vec4(reactiveColor, clamp(alpha, 0.0, 1.0));
+            }
+        `
+    });
+
+    const organicCore = new THREE.Mesh(coreGeo, coreMaterial);
+    scene.add(organicCore);
+
+
+    // --- 2. THE FLUID SWARM ---
+    const particleCount = 80000;
+    const swarmGeo = new THREE.BufferGeometry();
+    const posArray = new Float32Array(particleCount * 3);
+    const colorArray = new Float32Array(particleCount * 3);
+
+    // Soft glowing particle texture
+    const canvas = document.createElement('canvas');
+    canvas.width = 32; canvas.height = 32;
+    const ctx = canvas.getContext('2d');
+    const grad = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+    grad.addColorStop(0, 'rgba(255,255,255,1)');
+    grad.addColorStop(0.3, 'rgba(255,255,255,0.8)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 32, 32);
+    const particleTexture = new THREE.CanvasTexture(canvas);
+
+    for (let i = 0; i < particleCount; i++) {
+        // Distribute in a spherical volume
+        let radius = 25 + Math.random() * 80; 
+        let theta = Math.random() * Math.PI * 2;
+        let phi = Math.acos((Math.random() * 2) - 1);
+
+        posArray[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
+        posArray[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
+        posArray[i * 3 + 2] = radius * Math.cos(phi);
+
+        // Hues: Soft Pink, Soft Blue, White
+        let randColor = Math.random();
+        if (randColor < 0.45) {
+            colorArray[i*3] = 1.0; colorArray[i*3+1] = 0.71; colorArray[i*3+2] = 0.75; // Pink
+        } else if (randColor < 0.9) {
+            colorArray[i*3] = 0.67; colorArray[i*3+1] = 0.84; colorArray[i*3+2] = 0.90; // Blue
+        } else {
+            colorArray[i*3] = 1.0; colorArray[i*3+1] = 1.0; colorArray[i*3+2] = 1.0; // White
+        }
+    }
+
+    swarmGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+    swarmGeo.setAttribute('aColor', new THREE.BufferAttribute(colorArray, 3));
+
+    const swarmMaterial = new THREE.ShaderMaterial({
+        uniforms: coreUniforms, // Share uniforms with the core
+        uniforms: {
+            uTime: { value: 0 },
+            uAudioTex: { value: audioTexture },
+            uPointTex: { value: particleTexture },
+            uBass: { value: 0 },
+            uMids: { value: 0 },
+            uTreble: { value: 0 }
+        },
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        vertexShader: `
+            ${noiseGLSL}
+            uniform float uTime;
+            uniform sampler2D uAudioTex;
+            uniform float uBass;
+            uniform float uMids;
+            uniform float uTreble;
+
+            attribute vec3 aColor;
+            varying vec3 vColor;
+            varying float vAudioVal;
+
+            void main() {
+                vColor = aColor;
+                vec3 pos = position;
+
+                float dist = length(pos);
+                float normalizedDist = clamp((dist - 25.0) / 80.0, 0.0, 1.0);
+                
+                // Read local frequency
+                float audioVal = texture2D(uAudioTex, vec2(normalizedDist, 0.5)).r;
+                vAudioVal = audioVal;
+
+                // FLUID DYNAMICS (GPU Noise Displacement)
+                // Creates swirling, organic drift
+                vec3 noisePos = pos * 0.03 + uTime * 0.2;
+                vec3 turbulence = vec3(
+                    noise(noisePos),
+                    noise(noisePos + vec3(100.0)),
+                    noise(noisePos + vec3(200.0))
+                );
+
+                // Mids drive the turbulence intensity
+                pos += turbulence * (uMids * 25.0 + 5.0);
+
+                // VORTEX ROTATION
+                // Spin around Y axis, slower on the outside, faster with Bass
+                float angle = atan(pos.z, pos.x);
+                float currentRadius = length(pos.xz);
+                angle += (uTime * 0.1) + (uBass * 1.5) * (1.0 / (normalizedDist + 0.5));
+                
+                pos.x = cos(angle) * currentRadius;
+                pos.z = sin(angle) * currentRadius;
+
+                // BASS EXPANSION (Shockwave outward)
+                float expansion = 1.0 + (uBass * 0.4 * exp(-normalizedDist * 3.0));
+                pos *= expansion;
+
+                vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+                
+                // Size pulses with treble
+                float pSize = 1.5 + (audioVal * 4.0) + (uTreble * 3.0);
+                gl_PointSize = pSize * (200.0 / -mvPosition.z);
+                
+                gl_Position = projectionMatrix * mvPosition;
+            }
+        `,
+        fragmentShader: `
+            uniform sampler2D uPointTex;
+            uniform float uTreble;
+
+            varying vec3 vColor;
+            varying float vAudioVal;
+
+            void main() {
+                vec4 texColor = texture2D(uPointTex, gl_PointCoord);
+                
+                // Particles flash white on heavy audio strikes
+                vec3 finalColor = mix(vColor, vec3(1.0), vAudioVal * uTreble * 1.5);
+                
+                // Opacity pulses organically
+                float alpha = texColor.a * (0.3 + vAudioVal * 0.8 + uTreble * 0.5);
+                
+                gl_FragColor = vec4(finalColor, alpha);
+            }
+        `
+    });
+
+    const swarmSystem = new THREE.Points(swarmGeo, swarmMaterial);
+    scene.add(swarmSystem);
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // --- RENDER LOOP ---
+    const clock = new THREE.Clock();
+
+    function animate() {
+        requestAnimationFrame(animate);
+        if (!isRunning) {
+            renderer.render(scene, camera);
+            return;
+        }
+
+        const time = clock.getElapsedTime();
+
+        // 1. Audio Processing & GPU Texture
+        analyser.getByteFrequencyData(dataArray);
+        
+        // Boost raw signal for high sensitivity
+        for(let i=0; i<dataArray.length; i++) {
+            audioData[i] = Math.min(255, dataArray[i] * 2.5);
+        }
+        audioTexture.needsUpdate = true;
+
+        // 2. Global Audio Envelopes (Bass, Mids, Treble)
+        let bassSum = 0, midSum = 0, trebleSum = 0;
+        for (let i = 0; i < 15; i++) bassSum += (dataArray[i] / 255.0);
+        for (let i = 20; i < 100; i++) midSum += (dataArray[i] / 255.0);
+        for (let i = 150; i < 255; i++) trebleSum += (dataArray[i] / 255.0);
+        
+        let rawBass = bassSum / 15;
+        let rawMids = midSum / 80;
+        let rawTreble = trebleSum / 105;
+
+        // Smooth out the signal for organic fluid momentum
+        envBass = smoothAudio(envBass, rawBass * 1.8);
+        envMids = smoothAudio(envMids, rawMids * 2.0);
+        envTreble = smoothAudio(envTreble, rawTreble * 2.2);
+
+        // 3. Update Shader Uniforms
+        coreUniforms.uTime.value = time;
+        coreUniforms.uBass.value = envBass;
+        coreUniforms.uMids.value = envMids;
+        coreUniforms.uTreble.value = envTreble;
+
+        swarmMaterial.uniforms.uTime.value = time;
+        swarmMaterial.uniforms.uBass.value = envBass;
+        swarmMaterial.uniforms.uMids.value = envMids;
+        swarmMaterial.uniforms.uTreble.value = envTreble;
+
+        // Tumble the core slowly in the fluid
+        organicCore.rotation.y = time * 0.1;
+        organicCore.rotation.z = time * 0.05;
+
+        // 4. Cinematic Drift Camera
+        camera.position.x = Math.sin(time * 0.1) * 30;
+        camera.position.y = Math.cos(time * 0.15) * 15;
+        
+        // Bass expands the view slightly, as if pushed by a shockwave
+        camera.position.z = 100 + (envBass * 20.0);
+        camera.lookAt(0, 0, 0);
+
+        renderer.render(scene, camera);
+    }
+
+    animate();
+</script>
+</body>
+</html>
