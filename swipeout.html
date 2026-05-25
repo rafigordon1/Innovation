@@ -4,14 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SwipeOut — Unmonetise Your Attention</title>
-    <!-- Google Fonts implementation based on brand typography guidelines -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;800&family=Playpen+Sans:wght@400;700&display=swap" rel="stylesheet">
     
     <style>
         :root {
-            /* Exact brand color swatches matched from the document */
+            var(--brand-green): #5cc984;
             --brand-green: #5cc984;
             --brand-blue: #9acaff;
             --brand-coral: #ff5858;
@@ -37,12 +36,10 @@
             overflow-x: hidden;
         }
 
-        /* Handwritten accent font style */
         .handwritten {
             font-family: 'Playpen Sans', cursive;
         }
 
-        /* Navigation */
         nav {
             display: flex;
             justify-content: space-between;
@@ -54,12 +51,11 @@
         .logo {
             display: flex;
             align-items: center;
-            gap: 10px;
         }
 
-        .logo img {
+        .logo svg {
             height: 45px;
-            object-fit: contain;
+            width: auto;
         }
 
         nav ul {
@@ -80,7 +76,6 @@
             color: var(--brand-coral);
         }
 
-        /* Hero Section */
         .hero {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -89,7 +84,7 @@
         }
 
         .hero-text {
-            padding: 4rem 10% 4rem 10%;
+            padding: 4rem 10%;
             display: flex;
             flex-direction: column;
             justify-content: center;
@@ -128,16 +123,26 @@
             box-shadow: 8px 8px 0px var(--dark-text);
             transform: rotate(-3deg);
             transition: transform 0.3s ease;
+            position: relative;
+            z-index: 2;
         }
 
         .character-card:hover {
             transform: rotate(0deg) scale(1.03);
         }
 
-        .character-card img {
+        .svg-container {
             width: 100%;
+            height: 200px;
+            background: #f4f4f4;
             border-radius: 8px;
+            border: 2px solid var(--dark-text);
             margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            position: relative;
         }
 
         .character-traits {
@@ -157,7 +162,6 @@
             background: var(--brand-pastel-green);
         }
 
-        /* Interactive Prototype / Functionality Section */
         .functionality {
             padding: 5rem 5%;
             text-align: center;
@@ -205,21 +209,11 @@
         .feature-box.f2 { background-color: var(--brand-pink); }
         .feature-box.f3 { background-color: var(--brand-beige); }
 
-        .feature-box img {
-            width: 100%;
-            height: 180px;
-            object-fit: cover;
-            border: 2px solid var(--dark-text);
-            border-radius: 8px;
-            margin-bottom: 1.5rem;
-        }
-
         .feature-box h3 {
             font-size: 1.5rem;
             margin-bottom: 0.75rem;
         }
 
-        /* Satirical Banner */
         .satire-banner {
             background-color: var(--brand-coral);
             color: white;
@@ -235,7 +229,6 @@
             margin-bottom: 1rem;
         }
 
-        /* Call To Action Button */
         .btn {
             display: inline-block;
             background-color: var(--dark-text);
@@ -255,17 +248,15 @@
             box-shadow: 2px 2px 0 var(--dark-text);
         }
 
-        /* Background Pattern Decoration */
+        /* Generated Apple Pattern Background based on image 30.jpg & 22.png */
         .pattern-bg {
-            background-image: url('22.png');
-            background-size: contain;
-            opacity: 0.1;
             position: absolute;
             top: 0; left: 0; right: 0; bottom: 0;
-            pointer-events: none;
+            opacity: 0.15;
+            background-image: url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M20 10 Q15 5 10 12 Q5 19 10 28 Q15 35 20 32 Q25 35 30 28 Q35 19 30 12 Q25 5 20 10 M20 10 Q22 5 25 2' fill='none' stroke='%23000' stroke-width='1.5'/%3E%3C/svg%3E");
+            z-index: 1;
         }
 
-        /* Footer */
         footer {
             padding: 4rem 5%;
             background-color: var(--dark-text);
@@ -277,39 +268,65 @@
             gap: 2rem;
         }
 
-        footer .logo-bottom img {
-            height: 35px;
-            filter: invert(1);
+        footer svg path {
+            fill: white !important;
+            stroke: white !important;
+        }
+        footer svg text {
+            fill: white !important;
         }
 
-        /* Responsive Design Breakpoints */
+        .grid-assets {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1.5rem;
+        }
+        .asset-box {
+            background: white;
+            border: 2px solid var(--dark-text);
+            border-radius: 8px;
+            height: 200px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+
+        /* Color Palette Grid based on 43.png */
+        .color-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 10px;
+            width: 100%;
+            height: 100%;
+        }
+        .color-swatch { border-radius: 4px; }
+
         @media (max-width: 900px) {
-            .hero {
-                grid-template-columns: 1fr;
-            }
-            .hero-text {
-                border-right: none;
-                border-bottom: 2px solid var(--dark-text);
-                padding: 4rem 5%;
-            }
-            .hero-text h1 {
-                font-size: 2.5rem;
-            }
-            nav {
-                flex-direction: column;
-                gap: 1.5rem;
-                padding: 1.5rem 5%;
-            }
+            .hero { grid-template-columns: 1fr; }
+            .hero-text { border-right: none; border-bottom: 2px solid var(--dark-text); padding: 4rem 5%; }
+            .hero-text h1 { font-size: 2.5rem; }
+            nav { flex-direction: column; gap: 1.5rem; padding: 1.5rem 5%; }
         }
     </style>
 </head>
 <body>
 
-    <!-- Main Navigation Bar -->
     <nav>
         <div class="logo">
-            <!-- Referencing branding assets verbatim -->
-            <img src="logo.png" alt="SwipeOut Primary Logo Line Art">
+            <!-- Inline SVG Logo based on 16.png / 22.png -->
+            <svg viewBox="0 0 240 60" xmlns="http://www.w3.org/2000/svg">
+                <!-- S -->
+                <path d="M 50 20 Q 30 10 20 25 Q 10 40 30 35 Q 50 30 40 45 Q 30 60 10 45" fill="none" stroke="var(--brand-green)" stroke-width="12" stroke-linecap="round"/>
+                <!-- wipe -->
+                <text x="60" y="42" font-family="'Manrope', sans-serif" font-weight="800" font-size="32" fill="var(--dark-text)">wipe</text>
+                <!-- O -->
+                <ellipse cx="150" cy="31" rx="14" ry="16" fill="none" stroke="var(--brand-cream)" stroke-width="8"/>
+                <!-- ut -->
+                <text x="170" y="42" font-family="'Manrope', sans-serif" font-weight="800" font-size="32" fill="var(--dark-text)">ut</text>
+                <!-- Arrow on t -->
+                <path d="M 211 8 L 211 20 M 203 14 L 211 6 L 219 14" fill="none" stroke="var(--dark-text)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
         </div>
         <ul>
             <li><a href="#concept">The Rebellion</a></li>
@@ -318,7 +335,6 @@
         </ul>
     </nav>
 
-    <!-- Hero Content Interface Block -->
     <section class="hero" id="concept">
         <div class="hero-text">
             <span class="section-tag handwritten">Direct Political Rebellion</span>
@@ -330,9 +346,38 @@
         </div>
         <div class="hero-graphics">
             <div class="pattern-bg"></div>
-            <!-- Identity Mascot Block Card -->
+            
             <div class="character-card">
-                <img src="15.jpg" alt="SwipeOut Relatable Character Concept Art">
+                <!-- Inline SVG Mascot based on 15.jpg (Smiley ID Card) -->
+                <div class="svg-container">
+                    <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+                        <defs>
+                            <linearGradient id="rainbow" x1="0%" y1="0%" x2="100%" y2="100%">
+                                <stop offset="0%" stop-color="#9acaff"/>
+                                <stop offset="50%" stop-color="#fff9d4"/>
+                                <stop offset="100%" stop-color="#fbcbc9"/>
+                            </linearGradient>
+                        </defs>
+                        <!-- Lanyard / Body -->
+                        <path d="M 120 180 L 100 130 L 70 180 M 140 160 L 160 190" stroke="var(--dark-text)" stroke-width="6" fill="none" stroke-linecap="round"/>
+                        <!-- ID Badge Card -->
+                        <g transform="rotate(-15 100 100)">
+                            <rect x="50" y="40" width="100" height="130" rx="8" fill="url(#rainbow)" stroke="var(--dark-text)" stroke-width="4"/>
+                            <rect x="85" y="25" width="30" height="15" rx="4" fill="white" stroke="var(--dark-text)" stroke-width="3"/>
+                            <!-- Clip/Hole -->
+                            <circle cx="100" cy="32" r="3" fill="var(--dark-text)"/>
+                            <!-- Smiley Face -->
+                            <circle cx="100" cy="85" r="28" fill="#fbd341" stroke="var(--dark-text)" stroke-width="4"/>
+                            <!-- Eyes -->
+                            <path d="M 88 78 L 92 86 M 112 78 L 108 86" stroke="var(--dark-text)" stroke-width="4" stroke-linecap="round"/>
+                            <!-- Smile -->
+                            <path d="M 85 95 Q 100 110 115 95" fill="none" stroke="var(--dark-text)" stroke-width="4" stroke-linecap="round"/>
+                            <!-- Lines on Badge -->
+                            <line x1="60" y1="140" x2="140" y2="140" stroke="var(--dark-text)" stroke-width="2"/>
+                            <line x1="60" y1="155" x2="110" y2="155" stroke="var(--dark-text)" stroke-width="2"/>
+                        </g>
+                    </svg>
+                </div>
                 <h3 class="handwritten">Hey, look up!</h3>
                 <p>The anti-attention companion guiding you to actual presence.</p>
                 <div class="character-traits">
@@ -345,57 +390,137 @@
         </div>
     </section>
 
-    <!-- Platform Home Page Core Functionality Simulation -->
     <section class="functionality" id="features">
         <span class="section-tag">Platform Mechanics</span>
         <h2>Stripped-back minimalism built on natural human presence.</h2>
         
         <div class="interface-grid">
-            <!-- Feature Card 1 -->
             <div class="feature-box f1">
-                <img src="14.png" alt="SwipeOut Interface Mockup Aspect 1">
+                <!-- Concept text SVG based on 14.png -->
+                <div class="svg-container" style="background: white;">
+                    <svg viewBox="0 0 200 100" xmlns="http://www.w3.org/2000/svg">
+                        <text x="10" y="30" font-family="'Manrope', sans-serif" font-weight="800" font-size="14" fill="var(--dark-text)">SwipeOut challenges</text>
+                        <text x="10" y="50" font-family="'Manrope', sans-serif" font-weight="800" font-size="14" fill="var(--dark-text)">digital habits</text>
+                        <line x1="10" y1="70" x2="190" y2="70" stroke="var(--dark-text)" stroke-width="1" stroke-dasharray="4"/>
+                    </svg>
+                </div>
                 <h3>01. Physical Presence</h3>
                 <p>No infinite scrolling feeds. Designed entirely around real-world location matchpoints and timing matrices.</p>
             </div>
 
-            <!-- Feature Card 2 -->
             <div class="feature-box f2">
-                <img src="16.png" alt="SwipeOut Alternative Character Iteration">
+                <!-- Logo variation SVG based on 23.png -->
+                <div class="svg-container" style="background: white;">
+                    <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M 60 25 Q 30 15 20 40 Q 10 65 40 55 Q 70 45 60 70 Q 50 95 20 80" fill="none" stroke="var(--brand-green)" stroke-width="14" stroke-linecap="round"/>
+                        <ellipse cx="50" cy="70" rx="16" ry="16" fill="none" stroke="var(--brand-cream)" stroke-width="8"/>
+                        <!-- Up Arrow Overlap -->
+                        <circle cx="75" cy="75" r="14" fill="var(--brand-cream)"/>
+                        <path d="M 75 68 L 75 82 M 68 75 L 75 68 L 82 75" fill="none" stroke="var(--dark-text)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </div>
                 <h3>02. Unmonetised Focus</h3>
                 <p>We do not capture or monetize your focus window metrics. Your time remains completely unmetered.</p>
             </div>
 
-            <!-- Feature Card 3 -->
             <div class="feature-box f3">
-                <img src="17.png" alt="SwipeOut Design Elements Backdrop">
+                <!-- Typography map SVG based on 17.png -->
+                <div class="svg-container" style="background: white;">
+                    <svg viewBox="0 0 200 100" xmlns="http://www.w3.org/2000/svg">
+                        <text x="10" y="25" font-family="'Manrope', sans-serif" font-size="14" fill="var(--dark-text)">Agrandir</text>
+                        <text x="10" y="45" font-family="'Playpen Sans', cursive" font-size="14" fill="var(--dark-text)">Playpen Sans</text>
+                        <text x="10" y="65" font-family="'Manrope', sans-serif" font-weight="800" font-size="14" fill="var(--dark-text)">Poppins</text>
+                        <text x="120" y="35" font-family="'Playpen Sans', cursive" font-weight="700" font-size="16" fill="var(--dark-text)">Gaegu</text>
+                        <text x="120" y="60" font-family="'Manrope', sans-serif" font-weight="600" font-size="12" fill="var(--dark-text)">AC Diary Girl</text>
+                    </svg>
+                </div>
                 <h3>03. Pure Tactile Loop</h3>
                 <p>Utilizing playful modernism styles, the interaction triggers a single external connection step before dropping data entirely.</p>
             </div>
         </div>
     </section>
 
-    <!-- Satirical Tone Banner Segment -->
     <section class="satire-banner">
         <h3>This is not an app store download.</h3>
         <p class="handwritten" style="font-size: 1.4rem; max-width: 700px; margin: 0 auto;">Because an application trying to fix digital addiction is like a bakery serving water lines. Put it away.</p>
     </section>
 
-    <!-- Grid Asset Showcase Panel -->
     <section style="padding: 5rem 5%; background: var(--brand-cream); text-align: center;">
         <span class="section-tag">Visual Stylescape Artifacts</span>
         <h2 style="margin-bottom: 3rem;">Authentic Textures & Natural Forms</h2>
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.5rem;">
-            <img src="23.png" alt="Texture Framework Map" style="width: 100%; border: 2px solid #000; border-radius: 8px;">
-            <img src="29.jpg" alt="Atmosphere Inspiration Render" style="width: 100%; border: 2px solid #000; border-radius: 8px;">
-            <img src="30.jpg" alt="Botanical Contrast Study" style="width: 100%; border: 2px solid #000; border-radius: 8px;">
-            <img src="43.png" alt="Color Pattern Sequence Grid" style="width: 100%; border: 2px solid #000; border-radius: 8px;">
+        
+        <div class="grid-assets">
+            <!-- Asset 1: Color Palette Grid (43.png) -->
+            <div class="asset-box">
+                <div class="color-grid">
+                    <div class="color-swatch" style="background: var(--brand-green);"></div>
+                    <div class="color-swatch" style="background: var(--brand-blue);"></div>
+                    <div class="color-swatch" style="background: var(--brand-coral);"></div>
+                    <div class="color-swatch" style="background: var(--brand-pastel-green);"></div>
+                    <div class="color-swatch" style="background: var(--brand-cream);"></div>
+                    <div class="color-swatch" style="background: var(--brand-beige);"></div>
+                    <div class="color-swatch" style="background: #ffffff; border: 1px solid #ccc;"></div>
+                    <div class="color-swatch" style="background: var(--brand-pink);"></div>
+                    <div class="color-swatch" style="background: transparent;"></div>
+                </div>
+            </div>
+            
+            <!-- Asset 2: Nature Elements (29.jpg) -->
+            <div class="asset-box">
+                <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+                    <!-- Frog -->
+                    <circle cx="30" cy="30" r="15" fill="var(--brand-pastel-green)"/>
+                    <circle cx="22" cy="20" r="5" fill="var(--brand-pastel-green)"/>
+                    <circle cx="38" cy="20" r="5" fill="var(--brand-pastel-green)"/>
+                    <circle cx="22" cy="20" r="2" fill="var(--dark-text)"/>
+                    <circle cx="38" cy="20" r="2" fill="var(--dark-text)"/>
+                    <path d="M 25 35 Q 30 40 35 35" fill="none" stroke="var(--dark-text)" stroke-width="1.5" stroke-linecap="round"/>
+                    
+                    <!-- Sun -->
+                    <circle cx="70" cy="70" r="10" fill="#fbd341"/>
+                    <path d="M 70 50 L 70 55 M 70 85 L 70 90 M 50 70 L 55 70 M 85 70 L 90 70 M 56 56 L 60 60 M 84 84 L 80 80 M 56 84 L 60 80 M 84 56 L 80 60" stroke="#fbd341" stroke-width="2" stroke-linecap="round"/>
+                    
+                    <!-- Cloud -->
+                    <path d="M 60 25 A 10 10 0 0 0 70 15 A 12 12 0 0 1 85 20 A 8 8 0 0 1 80 35 L 60 35 Z" fill="var(--brand-blue)" stroke="white" stroke-width="2"/>
+                </svg>
+            </div>
+
+            <!-- Asset 3: Apple Pattern (30.jpg) -->
+            <div class="asset-box" style="background: var(--dark-text);">
+                <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <pattern id="apple-dark" x="0" y="0" width="30" height="30" patternUnits="userSpaceOnUse">
+                            <path d="M15 8 Q11 4 7 9 Q3 14 7 21 Q11 26 15 24 Q19 26 23 21 Q27 14 23 9 Q19 4 15 8 M15 8 Q17 4 19 2" fill="none" stroke="var(--brand-pastel-green)" stroke-width="1"/>
+                        </pattern>
+                    </defs>
+                    <rect width="100%" height="100%" fill="url(#apple-dark)" />
+                </svg>
+            </div>
+
+            <!-- Asset 4: Apple Pattern Light (30.jpg) -->
+            <div class="asset-box">
+                <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <pattern id="apple-light" x="0" y="0" width="30" height="30" patternUnits="userSpaceOnUse">
+                            <path d="M15 8 Q11 4 7 9 Q3 14 7 21 Q11 26 15 24 Q19 26 23 21 Q27 14 23 9 Q19 4 15 8 M15 8 Q17 4 19 2" fill="none" stroke="var(--brand-green)" stroke-width="1"/>
+                        </pattern>
+                    </defs>
+                    <rect width="100%" height="100%" fill="url(#apple-light)" />
+                </svg>
+            </div>
         </div>
     </section>
 
-    <!-- Bottom Matrix Block -->
     <footer>
         <div class="logo-bottom">
-            <img src="logo.png" alt="SwipeOut Branding Stamp">
+            <!-- Inline SVG Logo (White) -->
+            <svg viewBox="0 0 240 60" xmlns="http://www.w3.org/2000/svg" height="35px">
+                <path d="M 50 20 Q 30 10 20 25 Q 10 40 30 35 Q 50 30 40 45 Q 30 60 10 45" fill="none" stroke="white" stroke-width="12" stroke-linecap="round"/>
+                <text x="60" y="42" font-family="'Manrope', sans-serif" font-weight="800" font-size="32" fill="white">wipe</text>
+                <ellipse cx="150" cy="31" rx="14" ry="16" fill="none" stroke="white" stroke-width="8"/>
+                <text x="170" y="42" font-family="'Manrope', sans-serif" font-weight="800" font-size="32" fill="white">ut</text>
+                <path d="M 211 8 L 211 20 M 203 14 L 211 6 L 219 14" fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
         </div>
         <p style="font-size: 0.9rem; opacity: 0.8;">SwipeOut Project Strategy Framework. Built to exist strictly off-screen.</p>
     </footer>
