@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SwipeOut — Unmonetise Your Attention</title>
+    <!-- Google Fonts implementation based on brand typography guidelines -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;800&family=Playpen+Sans:wght@400;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            /* Exact brand color swatches matched from the document */
+            --brand-green: #5cc984;
+            --brand-blue: #9acaff;
+            --brand-coral: #ff5858;
+            --brand-pastel-green: #a2f2b7;
+            --brand-cream: #fff9d4;
+            --brand-beige: #faebd7;
+            --brand-pink: #fbcbc9;
+            --dark-text: #111111;
+            --bg-white: #faf9f6;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Manrope', sans-serif;
+            background-color: var(--bg-white);
+            color: var(--dark-text);
+            line-height: 1.5;
+            overflow-x: hidden;
+        }
+
+        /* Handwritten accent font style */
+        .handwritten {
+            font-family: 'Playpen Sans', cursive;
+        }
+
+        /* Navigation */
+        nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 2rem 5%;
+            border-bottom: 2px dashed var(--dark-text);
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logo img {
+            height: 45px;
+            object-fit: contain;
+        }
+
+        nav ul {
+            display: flex;
+            list-style: none;
+            gap: 2rem;
+        }
+
+        nav ul a {
+            text-decoration: none;
+            color: var(--dark-text);
+            font-weight: 600;
+            font-size: 1.1rem;
+            transition: color 0.2s;
+        }
+
+        nav ul a:hover {
+            color: var(--brand-coral);
+        }
+
+        /* Hero Section */
+        .hero {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            min-height: 80vh;
+            border-bottom: 2px solid var(--dark-text);
+        }
+
+        .hero-text {
+            padding: 4rem 10% 4rem 10%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            background-color: var(--brand-cream);
+            border-right: 2px solid var(--dark-text);
+        }
+
+        .hero-text h1 {
+            font-size: 3.5rem;
+            font-weight: 800;
+            line-height: 1.1;
+            margin-bottom: 1.5rem;
+        }
+
+        .hero-text p {
+            font-size: 1.25rem;
+            margin-bottom: 2rem;
+            font-weight: 400;
+        }
+
+        .hero-graphics {
+            background-color: var(--brand-blue);
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+        }
+
+        .character-card {
+            background: white;
+            border: 3px solid var(--dark-text);
+            border-radius: 16px;
+            padding: 1.5rem;
+            width: 320px;
+            box-shadow: 8px 8px 0px var(--dark-text);
+            transform: rotate(-3deg);
+            transition: transform 0.3s ease;
+        }
+
+        .character-card:hover {
+            transform: rotate(0deg) scale(1.03);
+        }
+
+        .character-card img {
+            width: 100%;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+
+        .character-traits {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+
+        .trait {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            font-weight: 800;
+            border: 1px solid var(--dark-text);
+            padding: 0.2rem 0.6rem;
+            border-radius: 20px;
+            background: var(--brand-pastel-green);
+        }
+
+        /* Interactive Prototype / Functionality Section */
+        .functionality {
+            padding: 5rem 5%;
+            text-align: center;
+            background: white;
+        }
+
+        .section-tag {
+            font-size: 1.2rem;
+            text-transform: uppercase;
+            font-weight: 800;
+            color: var(--brand-coral);
+            margin-bottom: 1rem;
+            display: block;
+        }
+
+        .functionality h2 {
+            font-size: 2.5rem;
+            max-width: 800px;
+            margin: 0 auto 3rem auto;
+            line-height: 1.2;
+        }
+
+        .interface-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2.5rem;
+            margin-top: 2rem;
+        }
+
+        .feature-box {
+            border: 2px solid var(--dark-text);
+            border-radius: 12px;
+            padding: 2rem;
+            text-align: left;
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.2s;
+        }
+
+        .feature-box:hover {
+            transform: translateY(-5px);
+        }
+
+        .feature-box.f1 { background-color: var(--brand-pastel-green); }
+        .feature-box.f2 { background-color: var(--brand-pink); }
+        .feature-box.f3 { background-color: var(--brand-beige); }
+
+        .feature-box img {
+            width: 100%;
+            height: 180px;
+            object-fit: cover;
+            border: 2px solid var(--dark-text);
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+        }
+
+        .feature-box h3 {
+            font-size: 1.5rem;
+            margin-bottom: 0.75rem;
+        }
+
+        /* Satirical Banner */
+        .satire-banner {
+            background-color: var(--brand-coral);
+            color: white;
+            padding: 3rem 5%;
+            text-align: center;
+            border-top: 2px solid var(--dark-text);
+            border-bottom: 2px solid var(--dark-text);
+        }
+
+        .satire-banner h3 {
+            font-size: 2.2rem;
+            font-weight: 800;
+            margin-bottom: 1rem;
+        }
+
+        /* Call To Action Button */
+        .btn {
+            display: inline-block;
+            background-color: var(--dark-text);
+            color: white;
+            padding: 1rem 2rem;
+            font-weight: 700;
+            text-decoration: none;
+            border-radius: 8px;
+            box-shadow: 4px 4px 0 var(--brand-green);
+            transition: all 0.2s;
+            border: 2px solid var(--dark-text);
+        }
+
+        .btn:hover {
+            background-color: white;
+            color: var(--dark-text);
+            box-shadow: 2px 2px 0 var(--dark-text);
+        }
+
+        /* Background Pattern Decoration */
+        .pattern-bg {
+            background-image: url('22.png');
+            background-size: contain;
+            opacity: 0.1;
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            pointer-events: none;
+        }
+
+        /* Footer */
+        footer {
+            padding: 4rem 5%;
+            background-color: var(--dark-text);
+            color: white;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 2rem;
+        }
+
+        footer .logo-bottom img {
+            height: 35px;
+            filter: invert(1);
+        }
+
+        /* Responsive Design Breakpoints */
+        @media (max-width: 900px) {
+            .hero {
+                grid-template-columns: 1fr;
+            }
+            .hero-text {
+                border-right: none;
+                border-bottom: 2px solid var(--dark-text);
+                padding: 4rem 5%;
+            }
+            .hero-text h1 {
+                font-size: 2.5rem;
+            }
+            nav {
+                flex-direction: column;
+                gap: 1.5rem;
+                padding: 1.5rem 5%;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Main Navigation Bar -->
+    <nav>
+        <div class="logo">
+            <!-- Referencing branding assets verbatim -->
+            <img src="13.jpg" alt="SwipeOut Primary Logo Line Art">
+        </div>
+        <ul>
+            <li><a href="#concept">The Rebellion</a></li>
+            <li><a href="#features">Offline Engine</a></li>
+            <li><a href="#characters">Meet the Snail</a></li>
+        </ul>
+    </nav>
+
+    <!-- Hero Content Interface Block -->
+    <section class="hero" id="concept">
+        <div class="hero-text">
+            <span class="section-tag handwritten">Direct Political Rebellion</span>
+            <h1>Leave your phone in your pocket and come hang out!</h1>
+            <p>SwipeOut challenges addictive digital habits by shifting attention loops straight into raw, physical, face-to-face connections. Cut out the fluff. Get straight to the point.</p>
+            <div>
+                <a href="#features" class="btn">Initiate Disconnection</a>
+            </div>
+        </div>
+        <div class="hero-graphics">
+            <div class="pattern-bg"></div>
+            <!-- Identity Mascot Block Card -->
+            <div class="character-card">
+                <img src="15.jpg" alt="SwipeOut Relatable Character Concept Art">
+                <h3 class="handwritten">Hey, look up!</h3>
+                <p>The anti-attention companion guiding you to actual presence.</p>
+                <div class="character-traits">
+                    <span class="trait">Approachable</span>
+                    <span class="trait">Satirical</span>
+                    <span class="trait">Friendly</span>
+                    <span class="trait">Raw</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Platform Home Page Core Functionality Simulation -->
+    <section class="functionality" id="features">
+        <span class="section-tag">Platform Mechanics</span>
+        <h2>Stripped-back minimalism built on natural human presence.</h2>
+        
+        <div class="interface-grid">
+            <!-- Feature Card 1 -->
+            <div class="feature-box f1">
+                <img src="14.png" alt="SwipeOut Interface Mockup Aspect 1">
+                <h3>01. Physical Presence</h3>
+                <p>No infinite scrolling feeds. Designed entirely around real-world location matchpoints and timing matrices.</p>
+            </div>
+
+            <!-- Feature Card 2 -->
+            <div class="feature-box f2">
+                <img src="16.png" alt="SwipeOut Alternative Character Iteration">
+                <h3>02. Unmonetised Focus</h3>
+                <p>We do not capture or monetize your focus window metrics. Your time remains completely unmetered.</p>
+            </div>
+
+            <!-- Feature Card 3 -->
+            <div class="feature-box f3">
+                <img src="17.png" alt="SwipeOut Design Elements Backdrop">
+                <h3>03. Pure Tactile Loop</h3>
+                <p>Utilizing playful modernism styles, the interaction triggers a single external connection step before dropping data entirely.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Satirical Tone Banner Segment -->
+    <section class="satire-banner">
+        <h3>This is not an app store download.</h3>
+        <p class="handwritten" style="font-size: 1.4rem; max-width: 700px; margin: 0 auto;">Because an application trying to fix digital addiction is like a bakery serving water lines. Put it away.</p>
+    </section>
+
+    <!-- Grid Asset Showcase Panel -->
+    <section style="padding: 5rem 5%; background: var(--brand-cream); text-align: center;">
+        <span class="section-tag">Visual Stylescape Artifacts</span>
+        <h2 style="margin-bottom: 3rem;">Authentic Textures & Natural Forms</h2>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.5rem;">
+            <img src="23.png" alt="Texture Framework Map" style="width: 100%; border: 2px solid #000; border-radius: 8px;">
+            <img src="29.jpg" alt="Atmosphere Inspiration Render" style="width: 100%; border: 2px solid #000; border-radius: 8px;">
+            <img src="30.jpg" alt="Botanical Contrast Study" style="width: 100%; border: 2px solid #000; border-radius: 8px;">
+            <img src="43.png" alt="Color Pattern Sequence Grid" style="width: 100%; border: 2px solid #000; border-radius: 8px;">
+        </div>
+    </section>
+
+    <!-- Bottom Matrix Block -->
+    <footer>
+        <div class="logo-bottom">
+            <img src="13.jpg" alt="SwipeOut Branding Stamp">
+        </div>
+        <p style="font-size: 0.9rem; opacity: 0.8;">SwipeOut Project Strategy Framework. Built to exist strictly off-screen.</p>
+    </footer>
+
+</body>
+</html>
