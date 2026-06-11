@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Shadow Mimic Entity - Scaled</title>
+    <title>Shadow Mimic Entity - Diagnostic Mode</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
     <style>
@@ -17,27 +17,30 @@
             display: block;
             width: 100vw;
             height: 100vh;
-            filter: blur(3px) contrast(1.8); /* Increased blur for more shadow effect */
+            filter: blur(3px) contrast(1.8);
         }
         #webcam {
             display: none;
         }
-        #overlay-text {
+        #debug-log {
             position: absolute;
-            top: 50%;
-            width: 100%;
-            text-align: center;
-            color: #555;
+            top: 20px;
+            left: 20px;
+            color: #ff5555;
             font-family: 'Courier New', Courier, monospace;
             font-size: 1.2rem;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border: 1px solid #ff5555;
             pointer-events: none;
-            transition: opacity 1s;
+            max-width: 80vw;
+            z-index: 100;
         }
     </style>
 </head>
 <body>
 
-    <div id="overlay-text">Summoning...</div>
+    <div id="debug-log">System Initializing...<br>If this box stays here, your browser is blocking the camera.<br>Ensure you are using a Local Server (e.g., Live Server) and not a file:// path.</div>
     <video id="webcam" autoplay playsinline></video>
     <canvas id="shadowCanvas"></canvas>
 
@@ -45,7 +48,12 @@
     const videoElement = document.getElementById('webcam');
     const canvasElement = document.getElementById('shadowCanvas');
     const canvasCtx = canvasElement.getContext('2d');
-    const overlayText = document.getElementById('overlay-text');
+    const debugLog = document.getElementById('debug-log');
+
+    function logError(msg) {
+        debugLog.innerHTML += `<br>> ${msg}`;
+        console.error(msg);
+    }
 
     function resizeCanvas() {
         canvasElement.width = window.innerWidth;
@@ -54,17 +62,28 @@
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
 
-    // Scale factor to make the figure loom larger and closer to the screen
+    // Visual pulse so you know the canvas is working while waiting for the camera
+    let pulseAngle = 0;
+    function drawStandbyPulse() {
+        if (videoElement.readyState >= 2) return; 
+        canvasCtx.fillStyle = 'rgba(10, 10, 14, 0.2)';
+        canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
+        canvasCtx.fillStyle = 'rgba(255, 255, 255, 0.03)';
+        canvasCtx.beginPath();
+        canvasCtx.arc(canvasElement.width / 2, canvasElement.height / 2, 100 + Math.sin(pulseAngle) * 50, 0, 2 * Math.PI);
+        canvasCtx.fill();
+        pulseAngle += 0.05;
+        requestAnimationFrame(drawStandbyPulse);
+    }
+    drawStandbyPulse();
+
     const LOOM_SCALE = 1.8; 
-    const VERTICAL_OFFSET = 0.2; // Push figure down slightly so head is centered
+    const VERTICAL_OFFSET = 0.2;
 
     function getScaledPos(landmark) {
         if (!landmark || landmark.visibility < 0.2) return null;
-        
-        // Center the scaling around the middle of the screen (0.5, 0.5)
         let nx = (landmark.x - 0.5) * LOOM_SCALE + 0.5;
         let ny = (landmark.y - 0.5 + VERTICAL_OFFSET) * LOOM_SCALE + 0.5;
-        
         return {
             x: nx * canvasElement.width,
             y: ny * canvasElement.height,
@@ -80,9 +99,6 @@
         
         const dx = pos2.x - pos1.x;
         const dy = pos2.y - pos1.y;
-        
-        const endX = pos1.x + (dx * extensionFactor);
-        const endY = pos1.y + (dy * extensionFactor);
 
         ctx.beginPath();
         ctx.moveTo(pos1.x, pos1.y);
@@ -90,7 +106,7 @@
         const steps = 6;
         for (let i = 1; i <= steps; i++) {
             const t = i / steps;
-            const jitterX = (Math.random() - 0.5) * 20; // Jagged edges
+            const jitterX = (Math.random() - 0.5) * 20;
             const jitterY = (Math.random() - 0.5) * 20;
             ctx.lineTo(pos1.x + dx * t + jitterX, pos1.y + dy * t + jitterY);
         }
@@ -101,18 +117,14 @@
     }
 
     function onResults(results) {
-        if (overlayText.style.opacity !== '0') overlayText.style.opacity = '0';
+        debugLog.style.display = 'none'; // Hide log once AI is running successfully
 
-        // Dimming clear for motion trails
         canvasCtx.fillStyle = 'rgba(10, 10, 14, 0.25)';
         canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
 
         canvasCtx.save();
-        
-        // Mirror canvas
         canvasCtx.translate(canvasElement.width, 0);
         canvasCtx.scale(-1, 1);
-        
         canvasCtx.shadowColor = 'rgba(0, 0, 0, 1)';
         canvasCtx.shadowBlur = 40;
 
@@ -120,7 +132,6 @@
             const lms = results.poseLandmarks;
             const arms = [[11, 13, 15], [12, 14, 16]]; 
             
-            // Draw Torso mass (Fallback to thick lines if hips are missing)
             const sL = getScaledPos(lms[11]);
             const sR = getScaledPos(lms[12]);
             const hL = getScaledPos(lms[23]);
@@ -131,39 +142,34 @@
                 canvasCtx.moveTo(sL.x, sL.y);
                 canvasCtx.lineTo(sR.x, sR.y);
                 if (hR) canvasCtx.lineTo(hR.x, hR.y);
-                else canvasCtx.lineTo(sR.x, sR.y + 400); // Fake body mass downward
+                else canvasCtx.lineTo(sR.x, sR.y + 400); 
                 if (hL) canvasCtx.lineTo(hL.x, hL.y);
-                else canvasCtx.lineTo(sL.x, sL.y + 400); // Fake body mass downward
+                else canvasCtx.lineTo(sL.x, sL.y + 400); 
                 canvasCtx.closePath();
                 canvasCtx.fillStyle = '#020202';
                 canvasCtx.fill();
             }
 
-            // Head (Distorted)
             const nose = getScaledPos(lms[0]);
             if (nose) {
                 canvasCtx.beginPath();
-                // Elongated neck/head shape
                 canvasCtx.ellipse(nose.x, nose.y - 30, 45 * LOOM_SCALE, 60 * LOOM_SCALE, 0, 0, 2 * Math.PI);
                 canvasCtx.fillStyle = '#000000';
                 canvasCtx.fill();
             }
 
-            // Arms & Spindly Fingers
             arms.forEach(arm => {
-                drawSpindlyBone(canvasCtx, lms[arm[0]], lms[arm[1]], 15); // Upper arm
-                drawSpindlyBone(canvasCtx, lms[arm[1]], lms[arm[2]], 10); // Lower arm
+                drawSpindlyBone(canvasCtx, lms[arm[0]], lms[arm[1]], 15);
+                drawSpindlyBone(canvasCtx, lms[arm[1]], lms[arm[2]], 10);
                 
                 const wrist = lms[arm[2]];
                 const index = lms[arm[2] === 15 ? 19 : 20]; 
                 const pinky = lms[arm[2] === 15 ? 17 : 18];
                 
                 if (wrist && index && pinky && wrist.visibility > 0.2) {
-                    // Massive extension multiplier for creepy long fingers
                     drawSpindlyBone(canvasCtx, wrist, index, 4, 4.5); 
                     drawSpindlyBone(canvasCtx, wrist, pinky, 4, 4.5);
                     
-                    // Fourth wall tap effect
                     if (wrist.z < -0.3) {
                         const wPos = getScaledPos(wrist);
                         if(wPos) {
@@ -201,10 +207,9 @@
         height: 480
     });
     
-    camera.start().catch(err => {
-        console.error(err);
-        overlayText.innerText = "Error: Camera access denied or blocked.";
-    });
+    camera.start()
+        .then(() => logError("Camera permission granted. Loading AI models..."))
+        .catch(err => logError("CAMERA ERROR: " + err.message));
 
 </script>
 </body>
