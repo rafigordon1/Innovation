@@ -3,33 +3,33 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Shadow Mimic Entity</title>
+    <title>Shadow Mimic Entity - Scaled</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
     <style>
         body {
             margin: 0;
             overflow: hidden;
-            background-color: #0a0a0c; /* Deep murky background */
-            background-image: radial-gradient(circle at center, #1a1a24 0%, #000000 100%);
+            background-color: #0a0a0c;
+            background-image: radial-gradient(circle at center, #1a1a2e 0%, #000000 100%);
         }
         canvas {
             display: block;
             width: 100vw;
             height: 100vh;
-            filter: blur(2px) contrast(1.5); /* Adds to the shadowy/dreamlike aesthetic */
+            filter: blur(3px) contrast(1.8); /* Increased blur for more shadow effect */
         }
         #webcam {
-            display: none; /* Hide raw video feed */
+            display: none;
         }
         #overlay-text {
             position: absolute;
             top: 50%;
             width: 100%;
             text-align: center;
-            color: rgba(255, 255, 255, 0.2);
+            color: #555;
             font-family: 'Courier New', Courier, monospace;
-            font-size: 1.5rem;
+            font-size: 1.2rem;
             pointer-events: none;
             transition: opacity 1s;
         }
@@ -37,7 +37,7 @@
 </head>
 <body>
 
-    <div id="overlay-text">Awaiting presence... (Please allow webcam access)</div>
+    <div id="overlay-text">Summoning...</div>
     <video id="webcam" autoplay playsinline></video>
     <canvas id="shadowCanvas"></canvas>
 
@@ -47,7 +47,6 @@
     const canvasCtx = canvasElement.getContext('2d');
     const overlayText = document.getElementById('overlay-text');
 
-    // Resize canvas to fit screen
     function resizeCanvas() {
         canvasElement.width = window.innerWidth;
         canvasElement.height = window.innerHeight;
@@ -55,39 +54,48 @@
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
 
-    // Spooky drawing settings
-    const drawSettings = {
-        shadowColor: 'rgba(0, 0, 0, 0.9)',
-        shadowBlur: 30,
-        lineCap: 'round',
-        lineJoin: 'round'
-    };
+    // Scale factor to make the figure loom larger and closer to the screen
+    const LOOM_SCALE = 1.8; 
+    const VERTICAL_OFFSET = 0.2; // Push figure down slightly so head is centered
+
+    function getScaledPos(landmark) {
+        if (!landmark || landmark.visibility < 0.2) return null;
+        
+        // Center the scaling around the middle of the screen (0.5, 0.5)
+        let nx = (landmark.x - 0.5) * LOOM_SCALE + 0.5;
+        let ny = (landmark.y - 0.5 + VERTICAL_OFFSET) * LOOM_SCALE + 0.5;
+        
+        return {
+            x: nx * canvasElement.width,
+            y: ny * canvasElement.height,
+            z: landmark.z
+        };
+    }
 
     function drawSpindlyBone(ctx, p1, p2, width, extensionFactor = 1.0) {
-        if (!p1 || !p2) return;
+        const pos1 = getScaledPos(p1);
+        const pos2 = getScaledPos(p2);
         
-        // Calculate vector and extend for 'spindly' effect
-        const dx = (p2.x - p1.x) * canvasElement.width;
-        const dy = (p2.y - p1.y) * canvasElement.height;
-        const startX = p1.x * canvasElement.width;
-        const startY = p1.y * canvasElement.height;
+        if (!pos1 || !pos2) return;
         
-        const endX = startX + (dx * extensionFactor);
-        const endY = startY + (dy * extensionFactor);
+        const dx = pos2.x - pos1.x;
+        const dy = pos2.y - pos1.y;
+        
+        const endX = pos1.x + (dx * extensionFactor);
+        const endY = pos1.y + (dy * extensionFactor);
 
         ctx.beginPath();
-        ctx.moveTo(startX, startY);
+        ctx.moveTo(pos1.x, pos1.y);
         
-        // Add jitter for a jagged, unnatural look
-        const steps = 5;
+        const steps = 6;
         for (let i = 1; i <= steps; i++) {
             const t = i / steps;
-            const jitterX = (Math.random() - 0.5) * 15;
-            const jitterY = (Math.random() - 0.5) * 15;
-            ctx.lineTo(startX + dx * t + jitterX, startY + dy * t + jitterY);
+            const jitterX = (Math.random() - 0.5) * 20; // Jagged edges
+            const jitterY = (Math.random() - 0.5) * 20;
+            ctx.lineTo(pos1.x + dx * t + jitterX, pos1.y + dy * t + jitterY);
         }
         
-        ctx.lineWidth = width;
+        ctx.lineWidth = width * LOOM_SCALE;
         ctx.strokeStyle = '#000000';
         ctx.stroke();
     }
@@ -95,67 +103,75 @@
     function onResults(results) {
         if (overlayText.style.opacity !== '0') overlayText.style.opacity = '0';
 
-        // Clear canvas with a slight fade for motion trails
-        canvasCtx.fillStyle = 'rgba(10, 10, 12, 0.3)';
+        // Dimming clear for motion trails
+        canvasCtx.fillStyle = 'rgba(10, 10, 14, 0.25)';
         canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
 
         canvasCtx.save();
         
-        // Mirror the canvas so the shadow acts like a reflection
+        // Mirror canvas
         canvasCtx.translate(canvasElement.width, 0);
         canvasCtx.scale(-1, 1);
-
-        canvasCtx.shadowColor = drawSettings.shadowColor;
-        canvasCtx.shadowBlur = drawSettings.shadowBlur;
+        
+        canvasCtx.shadowColor = 'rgba(0, 0, 0, 1)';
+        canvasCtx.shadowBlur = 40;
 
         if (results.poseLandmarks) {
-            const landmarks = results.poseLandmarks;
-
-            // Define connections (Body)
-            const torso = [11, 12, 24, 23]; // Shoulders and hips
-            const arms = [[11, 13, 15], [12, 14, 16]]; // Left and Right arms
+            const lms = results.poseLandmarks;
+            const arms = [[11, 13, 15], [12, 14, 16]]; 
             
-            // Draw Torso
-            canvasCtx.beginPath();
-            canvasCtx.moveTo(landmarks[11].x * canvasElement.width, landmarks[11].y * canvasElement.height);
-            canvasCtx.lineTo(landmarks[12].x * canvasElement.width, landmarks[12].y * canvasElement.height);
-            canvasCtx.lineTo(landmarks[24].x * canvasElement.width, landmarks[24].y * canvasElement.height);
-            canvasCtx.lineTo(landmarks[23].x * canvasElement.width, landmarks[23].y * canvasElement.height);
-            canvasCtx.closePath();
-            canvasCtx.fillStyle = '#050505';
-            canvasCtx.fill();
+            // Draw Torso mass (Fallback to thick lines if hips are missing)
+            const sL = getScaledPos(lms[11]);
+            const sR = getScaledPos(lms[12]);
+            const hL = getScaledPos(lms[23]);
+            const hR = getScaledPos(lms[24]);
 
-            // Draw Head (distorted)
-            const nose = landmarks[0];
+            if (sL && sR) {
+                canvasCtx.beginPath();
+                canvasCtx.moveTo(sL.x, sL.y);
+                canvasCtx.lineTo(sR.x, sR.y);
+                if (hR) canvasCtx.lineTo(hR.x, hR.y);
+                else canvasCtx.lineTo(sR.x, sR.y + 400); // Fake body mass downward
+                if (hL) canvasCtx.lineTo(hL.x, hL.y);
+                else canvasCtx.lineTo(sL.x, sL.y + 400); // Fake body mass downward
+                canvasCtx.closePath();
+                canvasCtx.fillStyle = '#020202';
+                canvasCtx.fill();
+            }
+
+            // Head (Distorted)
+            const nose = getScaledPos(lms[0]);
             if (nose) {
                 canvasCtx.beginPath();
-                canvasCtx.arc(nose.x * canvasElement.width, (nose.y - 0.05) * canvasElement.height, 40, 0, 2 * Math.PI);
+                // Elongated neck/head shape
+                canvasCtx.ellipse(nose.x, nose.y - 30, 45 * LOOM_SCALE, 60 * LOOM_SCALE, 0, 0, 2 * Math.PI);
                 canvasCtx.fillStyle = '#000000';
                 canvasCtx.fill();
             }
 
-            // Draw Arms & Spindly Fingers
+            // Arms & Spindly Fingers
             arms.forEach(arm => {
-                drawSpindlyBone(canvasCtx, landmarks[arm[0]], landmarks[arm[1]], 20); // Upper arm
-                drawSpindlyBone(canvasCtx, landmarks[arm[1]], landmarks[arm[2]], 15); // Lower arm
+                drawSpindlyBone(canvasCtx, lms[arm[0]], lms[arm[1]], 15); // Upper arm
+                drawSpindlyBone(canvasCtx, lms[arm[1]], lms[arm[2]], 10); // Lower arm
                 
-                // Fingers / Claws (Extending past the wrist)
-                const wrist = landmarks[arm[2]];
-                const index = landmarks[arm[2] === 15 ? 19 : 20]; // Hand indices
-                const pinky = landmarks[arm[2] === 15 ? 17 : 18];
+                const wrist = lms[arm[2]];
+                const index = lms[arm[2] === 15 ? 19 : 20]; 
+                const pinky = lms[arm[2] === 15 ? 17 : 18];
                 
-                if (wrist && index && pinky) {
-                    // Exaggerate the length of the fingers significantly
-                    drawSpindlyBone(canvasCtx, wrist, index, 5, 3.5); 
-                    drawSpindlyBone(canvasCtx, wrist, pinky, 5, 3.5);
+                if (wrist && index && pinky && wrist.visibility > 0.2) {
+                    // Massive extension multiplier for creepy long fingers
+                    drawSpindlyBone(canvasCtx, wrist, index, 4, 4.5); 
+                    drawSpindlyBone(canvasCtx, wrist, pinky, 4, 4.5);
                     
-                    // Interaction Logic: Pointing/Tapping
-                    // If hands come very close to the camera (low Z value), trigger a screen effect
-                    if (wrist.z < -0.4) {
-                        canvasCtx.fillStyle = 'rgba(255, 255, 255, 0.05)'; // Screen "tap" ripple effect
-                        canvasCtx.beginPath();
-                        canvasCtx.arc(wrist.x * canvasElement.width, wrist.y * canvasElement.height, 150 + Math.random() * 50, 0, 2 * Math.PI);
-                        canvasCtx.fill();
+                    // Fourth wall tap effect
+                    if (wrist.z < -0.3) {
+                        const wPos = getScaledPos(wrist);
+                        if(wPos) {
+                            canvasCtx.fillStyle = 'rgba(200, 220, 255, 0.08)';
+                            canvasCtx.beginPath();
+                            canvasCtx.arc(wPos.x, wPos.y, 200 + Math.random() * 100, 0, 2 * Math.PI);
+                            canvasCtx.fill();
+                        }
                     }
                 }
             });
@@ -163,7 +179,6 @@
         canvasCtx.restore();
     }
 
-    // Initialize MediaPipe Pose
     const pose = new Pose({locateFile: (file) => {
         return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
     }});
@@ -175,9 +190,9 @@
         minDetectionConfidence: 0.5,
         minTrackingConfidence: 0.5
     });
+    
     pose.onResults(onResults);
 
-    // Initialize Camera
     const camera = new Camera(videoElement, {
         onFrame: async () => {
             await pose.send({image: videoElement});
@@ -185,7 +200,11 @@
         width: 640,
         height: 480
     });
-    camera.start();
+    
+    camera.start().catch(err => {
+        console.error(err);
+        overlayText.innerText = "Error: Camera access denied or blocked.";
+    });
 
 </script>
 </body>
