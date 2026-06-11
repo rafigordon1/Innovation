@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Shadow Mimic Entity - Fix</title>
+    <title>Shadow Mimic Entity - Live</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
     <style>
@@ -20,7 +20,6 @@
             filter: blur(3px) contrast(1.8);
         }
         #webcam {
-            /* FIX: Hide off-screen instead of display: none so the browser doesn't pause the video stream */
             position: absolute;
             top: -9999px;
             left: -9999px;
@@ -47,7 +46,7 @@
 <body>
 
     <div id="debug-log">System Initializing...</div>
-    <video id="webcam" autoplay playsinline></video>
+    <video id="webcam" autoplay playsinline muted></video>
     <canvas id="shadowCanvas"></canvas>
 
 <script>
@@ -58,6 +57,7 @@
 
     function logStatus(msg) {
         debugLog.innerHTML += `<br>> ${msg}`;
+        console.log(msg);
     }
 
     function resizeCanvas() {
@@ -121,7 +121,9 @@
     }
 
     function onResults(results) {
-        debugLog.style.display = 'none'; // Hide log once we get real frames
+        if (debugLog.style.display !== 'none') {
+            debugLog.style.display = 'none';
+        }
 
         canvasCtx.fillStyle = 'rgba(10, 10, 14, 0.25)';
         canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
