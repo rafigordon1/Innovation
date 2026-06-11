@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shadow Mimic Entity</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #0a0a0c; /* Deep murky background */
+            background-image: radial-gradient(circle at center, #1a1a24 0%, #000000 100%);
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            filter: blur(2px) contrast(1.5); /* Adds to the shadowy/dreamlike aesthetic */
+        }
+        #webcam {
+            display: none; /* Hide raw video feed */
+        }
+        #overlay-text {
+            position: absolute;
+            top: 50%;
+            width: 100%;
+            text-align: center;
+            color: rgba(255, 255, 255, 0.2);
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 1.5rem;
+            pointer-events: none;
+            transition: opacity 1s;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="overlay-text">Awaiting presence... (Please allow webcam access)</div>
+    <video id="webcam" autoplay playsinline></video>
+    <canvas id="shadowCanvas"></canvas>
+
+<script>
+    const videoElement = document.getElementById('webcam');
+    const canvasElement = document.getElementById('shadowCanvas');
+    const canvasCtx = canvasElement.getContext('2d');
+    const overlayText = document.getElementById('overlay-text');
+
+    // Resize canvas to fit screen
+    function resizeCanvas() {
+        canvasElement.width = window.innerWidth;
+        canvasElement.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    // Spooky drawing settings
+    const drawSettings = {
+        shadowColor: 'rgba(0, 0, 0, 0.9)',
+        shadowBlur: 30,
+        lineCap: 'round',
+        lineJoin: 'round'
+    };
+
+    function drawSpindlyBone(ctx, p1, p2, width, extensionFactor = 1.0) {
+        if (!p1 || !p2) return;
+        
+        // Calculate vector and extend for 'spindly' effect
+        const dx = (p2.x - p1.x) * canvasElement.width;
+        const dy = (p2.y - p1.y) * canvasElement.height;
+        const startX = p1.x * canvasElement.width;
+        const startY = p1.y * canvasElement.height;
+        
+        const endX = startX + (dx * extensionFactor);
+        const endY = startY + (dy * extensionFactor);
+
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        
+        // Add jitter for a jagged, unnatural look
+        const steps = 5;
+        for (let i = 1; i <= steps; i++) {
+            const t = i / steps;
+            const jitterX = (Math.random() - 0.5) * 15;
+            const jitterY = (Math.random() - 0.5) * 15;
+            ctx.lineTo(startX + dx * t + jitterX, startY + dy * t + jitterY);
+        }
+        
+        ctx.lineWidth = width;
+        ctx.strokeStyle = '#000000';
+        ctx.stroke();
+    }
+
+    function onResults(results) {
+        if (overlayText.style.opacity !== '0') overlayText.style.opacity = '0';
+
+        // Clear canvas with a slight fade for motion trails
+        canvasCtx.fillStyle = 'rgba(10, 10, 12, 0.3)';
+        canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
+
+        canvasCtx.save();
+        
+        // Mirror the canvas so the shadow acts like a reflection
+        canvasCtx.translate(canvasElement.width, 0);
+        canvasCtx.scale(-1, 1);
+
+        canvasCtx.shadowColor = drawSettings.shadowColor;
+        canvasCtx.shadowBlur = drawSettings.shadowBlur;
+
+        if (results.poseLandmarks) {
+            const landmarks = results.poseLandmarks;
+
+            // Define connections (Body)
+            const torso = [11, 12, 24, 23]; // Shoulders and hips
+            const arms = [[11, 13, 15], [12, 14, 16]]; // Left and Right arms
+            
+            // Draw Torso
+            canvasCtx.beginPath();
+            canvasCtx.moveTo(landmarks[11].x * canvasElement.width, landmarks[11].y * canvasElement.height);
+            canvasCtx.lineTo(landmarks[12].x * canvasElement.width, landmarks[12].y * canvasElement.height);
+            canvasCtx.lineTo(landmarks[24].x * canvasElement.width, landmarks[24].y * canvasElement.height);
+            canvasCtx.lineTo(landmarks[23].x * canvasElement.width, landmarks[23].y * canvasElement.height);
+            canvasCtx.closePath();
+            canvasCtx.fillStyle = '#050505';
+            canvasCtx.fill();
+
+            // Draw Head (distorted)
+            const nose = landmarks[0];
+            if (nose) {
+                canvasCtx.beginPath();
+                canvasCtx.arc(nose.x * canvasElement.width, (nose.y - 0.05) * canvasElement.height, 40, 0, 2 * Math.PI);
+                canvasCtx.fillStyle = '#000000';
+                canvasCtx.fill();
+            }
+
+            // Draw Arms & Spindly Fingers
+            arms.forEach(arm => {
+                drawSpindlyBone(canvasCtx, landmarks[arm[0]], landmarks[arm[1]], 20); // Upper arm
+                drawSpindlyBone(canvasCtx, landmarks[arm[1]], landmarks[arm[2]], 15); // Lower arm
+                
+                // Fingers / Claws (Extending past the wrist)
+                const wrist = landmarks[arm[2]];
+                const index = landmarks[arm[2] === 15 ? 19 : 20]; // Hand indices
+                const pinky = landmarks[arm[2] === 15 ? 17 : 18];
+                
+                if (wrist && index && pinky) {
+                    // Exaggerate the length of the fingers significantly
+                    drawSpindlyBone(canvasCtx, wrist, index, 5, 3.5); 
+                    drawSpindlyBone(canvasCtx, wrist, pinky, 5, 3.5);
+                    
+                    // Interaction Logic: Pointing/Tapping
+                    // If hands come very close to the camera (low Z value), trigger a screen effect
+                    if (wrist.z < -0.4) {
+                        canvasCtx.fillStyle = 'rgba(255, 255, 255, 0.05)'; // Screen "tap" ripple effect
+                        canvasCtx.beginPath();
+                        canvasCtx.arc(wrist.x * canvasElement.width, wrist.y * canvasElement.height, 150 + Math.random() * 50, 0, 2 * Math.PI);
+                        canvasCtx.fill();
+                    }
+                }
+            });
+        }
+        canvasCtx.restore();
+    }
+
+    // Initialize MediaPipe Pose
+    const pose = new Pose({locateFile: (file) => {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
+    }});
+    
+    pose.setOptions({
+        modelComplexity: 1,
+        smoothLandmarks: true,
+        enableSegmentation: false,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+    });
+    pose.onResults(onResults);
+
+    // Initialize Camera
+    const camera = new Camera(videoElement, {
+        onFrame: async () => {
+            await pose.send({image: videoElement});
+        },
+        width: 640,
+        height: 480
+    });
+    camera.start();
+
+</script>
+</body>
+</html>
