@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Shadow Mimic Entity - Live</title>
+    <title>Shadow Mimic Entity - Native Camera</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
     <style>
@@ -20,25 +20,28 @@
             filter: blur(3px) contrast(1.8);
         }
         #webcam {
+            /* Now visible in the corner for debugging */
             position: absolute;
-            top: -9999px;
-            left: -9999px;
-            opacity: 0;
-            width: 640px;
-            height: 480px;
+            bottom: 20px;
+            right: 20px;
+            width: 160px;
+            height: 120px;
+            border: 2px solid #555;
+            background: #000;
+            z-index: 1000;
+            transform: scaleX(-1); /* Mirror the mini-feed */
         }
         #debug-log {
             position: absolute;
             top: 20px;
             left: 20px;
-            color: #ff5555;
+            color: #00ff00;
             font-family: 'Courier New', Courier, monospace;
-            font-size: 1.2rem;
+            font-size: 1rem;
             background: rgba(0, 0, 0, 0.8);
             padding: 15px;
-            border: 1px solid #ff5555;
+            border: 1px solid #00ff00;
             pointer-events: none;
-            max-width: 80vw;
             z-index: 100;
         }
     </style>
@@ -205,17 +208,46 @@
     
     pose.onResults(onResults);
 
-    const camera = new Camera(videoElement, {
-        onFrame: async () => {
-            await pose.send({image: videoElement});
-        },
-        width: 640,
-        height: 480
+    // Native Camera Setup
+    async function startCamera() {
+        try {
+            logStatus("Requesting camera access...");
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { width: 640, height: 480, facingMode: 'user' }, 
+                audio: false 
+            });
+            videoElement.srcObject = stream;
+            
+            return new Promise((resolve) => {
+                videoElement.onloadedmetadata = () => {
+                    videoElement.play();
+                    resolve();
+                };
+            });
+        } catch (err) {
+            logStatus("ERROR: " + err.message);
+            throw err;
+        }
+    }
+
+    // Manual Frame Pumping
+    async function processVideo() {
+        try {
+            await pose.send({ image: videoElement });
+        } catch (e) {
+            console.error(e);
+        }
+        // Keep pumping frames to the AI
+        requestAnimationFrame(processVideo);
+    }
+
+    // Boot Sequence
+    startCamera().then(() => {
+        logStatus("Camera streaming. Initializing AI...");
+        processVideo();
+    }).catch(err => {
+        console.error("Boot failed", err);
     });
-    
-    camera.start()
-        .then(() => logStatus("Camera on. Processing first frame..."))
-        .catch(err => logStatus("CAMERA ERROR: " + err.message));
 
 </script>
 </body>
