@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Shadow Mimic Entity - Diagnostic Mode</title>
+    <title>Shadow Mimic Entity - Fix</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
     <style>
@@ -20,7 +20,13 @@
             filter: blur(3px) contrast(1.8);
         }
         #webcam {
-            display: none;
+            /* FIX: Hide off-screen instead of display: none so the browser doesn't pause the video stream */
+            position: absolute;
+            top: -9999px;
+            left: -9999px;
+            opacity: 0;
+            width: 640px;
+            height: 480px;
         }
         #debug-log {
             position: absolute;
@@ -40,7 +46,7 @@
 </head>
 <body>
 
-    <div id="debug-log">System Initializing...<br>If this box stays here, your browser is blocking the camera.<br>Ensure you are using a Local Server (e.g., Live Server) and not a file:// path.</div>
+    <div id="debug-log">System Initializing...</div>
     <video id="webcam" autoplay playsinline></video>
     <canvas id="shadowCanvas"></canvas>
 
@@ -50,9 +56,8 @@
     const canvasCtx = canvasElement.getContext('2d');
     const debugLog = document.getElementById('debug-log');
 
-    function logError(msg) {
+    function logStatus(msg) {
         debugLog.innerHTML += `<br>> ${msg}`;
-        console.error(msg);
     }
 
     function resizeCanvas() {
@@ -62,10 +67,9 @@
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
 
-    // Visual pulse so you know the canvas is working while waiting for the camera
     let pulseAngle = 0;
     function drawStandbyPulse() {
-        if (videoElement.readyState >= 2) return; 
+        if (videoElement.readyState >= 2 && debugLog.style.display === 'none') return; 
         canvasCtx.fillStyle = 'rgba(10, 10, 14, 0.2)';
         canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
         canvasCtx.fillStyle = 'rgba(255, 255, 255, 0.03)';
@@ -117,7 +121,7 @@
     }
 
     function onResults(results) {
-        debugLog.style.display = 'none'; // Hide log once AI is running successfully
+        debugLog.style.display = 'none'; // Hide log once we get real frames
 
         canvasCtx.fillStyle = 'rgba(10, 10, 14, 0.25)';
         canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
@@ -208,8 +212,8 @@
     });
     
     camera.start()
-        .then(() => logError("Camera permission granted. Loading AI models..."))
-        .catch(err => logError("CAMERA ERROR: " + err.message));
+        .then(() => logStatus("Camera on. Processing first frame..."))
+        .catch(err => logStatus("CAMERA ERROR: " + err.message));
 
 </script>
 </body>
